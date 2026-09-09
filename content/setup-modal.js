@@ -1,22 +1,34 @@
 (function () {
   const D365IA = (window.D365IA = window.D365IA || {});
 
-  // Order matches the real click order on the D365 Import screen so the
-  // list itself is a walkthrough.
+  // Short labels; order matches the real click order on the D365 Import
+  // screen. Longer how-to text lives in ROLE_HINTS, shown under the label.
   const ROLE_LABELS = {
-    addFileButton: '1. "Add file" button (adds a new row to fill in)',
-    sourceFormatField: '2. "Source data format" dropdown for that row',
-    sourceFormatOption:
-      '3. One option in that dropdown’s open list — e.g. click it open, Alt+click "Excel"',
-    entityNameField: '4. Entity name field (appears after picking Excel/CSV)',
-    suggestionItem: '5. One row in the entity name autocomplete suggestions — type a few letters first to open it',
-    fileTarget: '6. File input / drop target for the row',
-    uploadButton: '7. "Upload" button for the row',
-    entitiesGridRow:
-      'Optional: one row in the grid of already-uploaded entities — used to detect success. Add a file manually first so a row exists to click.',
-    runImportButton:
-      'Optional: the page-level "Import"/Run button — only used if you turn on auto-run in Settings; never clicked otherwise.'
+    addFileButton: 'Add file button',
+    sourceFormatField: 'Source data format dropdown',
+    sourceFormatOption: 'One option in that dropdown’s open list',
+    entityNameField: 'Entity name field',
+    suggestionItem: 'One row in the entity name suggestions',
+    fileTarget: 'File input / drop target',
+    uploadButton: 'Upload button',
+    entitiesGridRow: 'One row in the uploaded-entities grid',
+    runImportButton: 'Page-level Import/Run button'
   };
+
+  const ROLE_HINTS = {
+    addFileButton: 'Adds a new row to fill in.',
+    sourceFormatField: 'Alt+click the closed dropdown control on the row.',
+    sourceFormatOption: 'Open the dropdown, then Alt+click one option (e.g. "Excel").',
+    entityNameField: 'Pick a format first so this field appears, then Alt+click it.',
+    suggestionItem: 'Type a few letters into the entity field to open the list first.',
+    fileTarget: 'The row’s file input or drop target.',
+    uploadButton: 'The row’s Upload button.',
+    entitiesGridRow:
+      'Add one file manually first so a row exists to click. Used to detect success — falls back to a fixed pause if left unbound.',
+    runImportButton: 'Only clicked if auto-run is turned on in Settings; otherwise never touched.'
+  };
+
+  const OPTIONAL_ROLES = new Set(['entitiesGridRow', 'runImportButton']);
 
   let modalEl = null;
 
@@ -30,10 +42,9 @@
           <button id="d365ia-setup-x" title="Close" aria-label="Close">&times;</button>
         </div>
         <p>
-          Click "Bind", then use the page normally (click a field, type into it, open its
-          dropdown, etc) until the element you want is visible. Hold <strong>Alt</strong> and
-          click it to bind — a plain click won't finalize anything. Press Esc to cancel a bind in
-          progress, or click outside this box / the &times; to close.
+          Click <strong>Bind</strong>, use the page normally to reveal the element (click, type,
+          open a dropdown), then hold <strong>Alt</strong> and click it to confirm — a plain
+          click just reaches the page. <strong>Esc</strong> cancels a bind in progress.
         </p>
         <div id="d365ia-setup-rows"></div>
         <button id="d365ia-setup-close">Done</button>
@@ -42,27 +53,73 @@
     document.body.appendChild(modal);
 
     const rows = modal.querySelector('#d365ia-setup-rows');
+    let requiredCount = 0;
+    let optionalHeaderAdded = false;
+
     D365IA.binder.ROLES.forEach((role) => {
+      if (OPTIONAL_ROLES.has(role) && !optionalHeaderAdded) {
+        const divider = document.createElement('div');
+        divider.className = 'd365ia-setup-divider';
+        divider.textContent = 'Optional';
+        rows.appendChild(divider);
+        optionalHeaderAdded = true;
+      }
+
       const row = document.createElement('div');
       row.className = 'd365ia-setup-row';
 
-      const label = document.createElement('span');
+      const top = document.createElement('div');
+      top.className = 'd365ia-setup-row-top';
+
+      const badge = document.createElement('span');
+      if (OPTIONAL_ROLES.has(role)) {
+        badge.className = 'd365ia-setup-badge d365ia-setup-badge-optional';
+        badge.textContent = 'opt';
+      } else {
+        requiredCount++;
+        badge.className = 'd365ia-setup-badge';
+        badge.textContent = String(requiredCount);
+      }
+
+      const labelWrap = document.createElement('div');
+      labelWrap.className = 'd365ia-setup-label-wrap';
+      const label = document.createElement('div');
       label.className = 'd365ia-setup-label';
       label.textContent = ROLE_LABELS[role] || role;
+      const hint = document.createElement('div');
+      hint.className = 'd365ia-setup-hint';
+      hint.textContent = ROLE_HINTS[role] || '';
+      labelWrap.appendChild(label);
+      labelWrap.appendChild(hint);
 
-      const value = document.createElement('span');
-      value.className = 'd365ia-setup-value';
-      value.id = `d365ia-val-${role}`;
-      value.textContent = 'not bound';
+      const btnGroup = document.createElement('div');
+      btnGroup.className = 'd365ia-setup-btn-group';
 
       const btn = document.createElement('button');
       btn.className = 'd365ia-setup-bind';
       btn.dataset.role = role;
       btn.textContent = 'Bind';
 
-      row.appendChild(label);
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'd365ia-setup-clear';
+      clearBtn.dataset.role = role;
+      clearBtn.textContent = 'Clear';
+      clearBtn.title = 'Unbind this field without touching the others';
+
+      btnGroup.appendChild(btn);
+      btnGroup.appendChild(clearBtn);
+
+      top.appendChild(badge);
+      top.appendChild(labelWrap);
+      top.appendChild(btnGroup);
+
+      const value = document.createElement('div');
+      value.className = 'd365ia-setup-value';
+      value.id = `d365ia-val-${role}`;
+      value.textContent = 'not bound';
+
+      row.appendChild(top);
       row.appendChild(value);
-      row.appendChild(btn);
       rows.appendChild(row);
     });
 
@@ -76,7 +133,9 @@
           async ({ role, selector, isFileInput, isSelect }) => {
             await D365IA.binder.saveBinding(role, selector, { isFileInput, isSelect });
             modal.style.display = 'flex';
-            document.getElementById(`d365ia-val-${role}`).textContent = selector;
+            const valueEl = document.getElementById(`d365ia-val-${role}`);
+            valueEl.textContent = selector;
+            valueEl.title = selector;
             btn.textContent = 'Rebind';
           },
           () => {
@@ -84,6 +143,20 @@
             btn.textContent = prevText;
           }
         );
+      });
+    });
+
+    // Unbinds just this one role — for when a bind was misclicked onto the
+    // wrong element and shouldn't take the other, correct bindings with it.
+    rows.querySelectorAll('.d365ia-setup-clear').forEach((clearBtn) => {
+      clearBtn.addEventListener('click', async () => {
+        const role = clearBtn.dataset.role;
+        await D365IA.binder.clearBinding(role);
+        const valueEl = document.getElementById(`d365ia-val-${role}`);
+        valueEl.textContent = 'not bound';
+        valueEl.title = '';
+        const bindBtn = rows.querySelector(`.d365ia-setup-bind[data-role="${role}"]`);
+        if (bindBtn) bindBtn.textContent = 'Bind';
       });
     });
 
@@ -103,7 +176,10 @@
     const bindings = await D365IA.binder.getBindings();
     D365IA.binder.ROLES.forEach((role) => {
       const el = document.getElementById(`d365ia-val-${role}`);
-      if (el) el.textContent = (bindings[role] && bindings[role].selector) || 'not bound';
+      if (!el) return;
+      const selector = (bindings[role] && bindings[role].selector) || 'not bound';
+      el.textContent = selector;
+      el.title = selector;
     });
   }
 
