@@ -18,7 +18,12 @@
     modal.innerHTML = `
       <div id="d365ia-setup-box">
         <h3>Bind D365 fields</h3>
-        <p>Click "Bind" then click the matching element on the D365 page. This is saved per browser and only needs doing once per environment.</p>
+        <p>
+          Click "Bind", then use the page normally (click a field, type into it, open its
+          dropdown, etc) until the element you want is visible. Hold <strong>Alt</strong> and
+          click it to bind — a plain click won't finalize anything. Press Esc to cancel. This is
+          saved per browser and only needs doing once per environment.
+        </p>
         <div id="d365ia-setup-rows"></div>
         <button id="d365ia-setup-close">Done</button>
       </div>
@@ -52,14 +57,22 @@
 
     rows.querySelectorAll('.d365ia-setup-bind').forEach((btn) => {
       btn.addEventListener('click', () => {
+        const prevText = btn.textContent;
         modal.style.display = 'none';
-        btn.textContent = 'Click target on page...';
-        D365IA.binder.startPicking(btn.dataset.role, async ({ role, selector, isFileInput }) => {
-          await D365IA.binder.saveBinding(role, selector, { isFileInput });
-          modal.style.display = 'flex';
-          document.getElementById(`d365ia-val-${role}`).textContent = selector;
-          btn.textContent = 'Rebind';
-        });
+        btn.textContent = 'Alt+click the target...';
+        D365IA.binder.startPicking(
+          btn.dataset.role,
+          async ({ role, selector, isFileInput }) => {
+            await D365IA.binder.saveBinding(role, selector, { isFileInput });
+            modal.style.display = 'flex';
+            document.getElementById(`d365ia-val-${role}`).textContent = selector;
+            btn.textContent = 'Rebind';
+          },
+          () => {
+            modal.style.display = 'flex';
+            btn.textContent = prevText;
+          }
+        );
       });
     });
 

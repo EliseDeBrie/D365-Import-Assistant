@@ -9,7 +9,10 @@ from the cleaned-up file name, then attaches the file — no typing per file.
 
 1. A floating **Import Assist** button appears on any `*.dynamics.com` page.
    Click it to open the drop panel.
-2. Drag one or many Excel files onto the panel (or click it to browse).
+2. Drag one or many Excel files anywhere onto the page (the whole page is a
+   drop target, not just the small box — dropping on the launcher button
+   works too, and it'll open the panel for you). Or click the panel's box to
+   browse instead.
 3. For each file, the file name is cleaned up (leading/trailing sequence
    numbers, dates/timestamps, and `_`/`-` separators are stripped — see
    *Cleaning rules* below) to produce a guessed entity name.
@@ -36,11 +39,17 @@ point at the real elements once:
 
 1. Open the Data management → Import screen you use.
 2. Click **Import Assist → Setup fields**.
-3. Click **Bind** next to each row, then click the matching element on the
-   page:
-   - **Entity name field** — the box you type the entity into.
-   - **Suggestion row** — open the autocomplete dropdown first (type
-     anything into the entity field), then click one suggestion row.
+3. Click **Bind** next to a row. The setup dialog hides itself and the page
+   behaves completely normally again — click into fields, type, open
+   dropdowns, whatever it takes to reveal the actual element you want. When
+   the right element is visible, hold **Alt** and click it to bind it (a
+   plain click does nothing to the picker — it only reaches the page). Press
+   **Esc** any time to cancel.
+   - **Entity name field** — the box you type the entity into. Alt+click it
+     directly.
+   - **Suggestion row** — type something into the entity field first so
+     D365's own autocomplete dropdown opens, *then* Alt+click one suggestion
+     row in that dropdown.
    - **File target** — the file input or drop target for that grid row.
    - **Add row button** *(optional)* — the button that adds a new import line.
    - **Import/Submit button** *(optional)* — only needed if you turn on

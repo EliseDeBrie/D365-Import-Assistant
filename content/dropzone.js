@@ -51,13 +51,14 @@
         dz.classList.remove('d365ia-dragover');
       }
     });
-    dz.addEventListener('drop', async (e) => {
+    // The actual file-adding on drop is handled once, globally, in
+    // content.js (setupGlobalDropCapture) — that's what lets you drop
+    // anywhere on the page, not just this small box. This listener only
+    // resets the visual highlight.
+    dz.addEventListener('drop', (e) => {
       e.preventDefault();
       dragCounter = 0;
       dz.classList.remove('d365ia-dragover');
-      const settings = await getSettings();
-      queue.addFiles(e.dataTransfer.files, settings.rules);
-      setStatus(`Added ${e.dataTransfer.files.length} file(s) to the queue.`);
     });
     dz.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', async () => {

@@ -151,9 +151,36 @@
   outline-offset: 1px;
 }
 
-body.d365ia-picking,
-body.d365ia-picking * {
-  cursor: crosshair !important;
+#d365ia-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000002;
+  background: rgba(0, 120, 212, 0.15);
+  border: 4px dashed #0078d4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 20px/1.4 'Segoe UI', sans-serif;
+  color: #0078d4;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+  pointer-events: none;
+}
+
+#d365ia-picker-hint {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #222;
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font: 13px/1.4 'Segoe UI', sans-serif;
+  z-index: 1000001;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  max-width: 90vw;
+  text-align: center;
 }
 
 #d365ia-setup-modal {

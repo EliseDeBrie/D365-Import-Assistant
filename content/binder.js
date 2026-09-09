@@ -10,6 +10,8 @@
   let pickerRole = null;
   let hoverEl = null;
   let onPicked = null;
+  let onCancelled = null;
+  let hintEl = null;
 
   function highlight(el) {
     if (hoverEl) hoverEl.classList.remove('d365ia-hover-highlight');
@@ -22,8 +24,14 @@
     highlight(e.target);
   }
 
+  // Plain clicks are left alone so the page behaves normally while picking
+  // is active — you can click a field to focus it, type into it, open its
+  // dropdown, etc. Only Alt+click finalizes a binding, so reaching a target
+  // that's nested behind other interactions (e.g. an autocomplete suggestion
+  // that only appears after you've typed something) still works.
   function handleClick(e) {
     if (!pickerActive) return;
+    if (!e.altKey) return;
     e.preventDefault();
     e.stopPropagation();
     const el = e.target;
@@ -41,23 +49,56 @@
     }
   }
 
-  function startPicking(role, callback) {
+  function handleKeydown(e) {
+    if (!pickerActive) return;
+    if (e.key === 'Escape') {
+      const cancelCb = onCancelled;
+      stopPicking();
+      if (cancelCb) cancelCb();
+    }
+  }
+
+  function showHint() {
+    hintEl = document.createElement('div');
+    hintEl.id = 'd365ia-picker-hint';
+    hintEl.textContent =
+      'Interact with the page as usual to reveal the field (click to focus it, type to open a dropdown, etc). Hold Alt and click the element you want to bind it to. Press Esc to cancel.';
+    document.body.appendChild(hintEl);
+  }
+
+  function hideHint() {
+    if (hintEl) {
+      hintEl.remove();
+      hintEl = null;
+    }
+  }
+
+  function startPicking(role, callback, onCancel) {
     pickerActive = true;
     pickerRole = role;
     onPicked = callback;
+    onCancelled = onCancel || null;
     document.addEventListener('mouseover', handleMouseOver, true);
+    // Capture phase so we see the click before the page does, but we only
+    // act on it (preventDefault/stopPropagation) when Alt is held — a plain
+    // click passes straight through to the page underneath.
     document.addEventListener('click', handleClick, true);
+    document.addEventListener('keydown', handleKeydown, true);
     document.body.classList.add('d365ia-picking');
+    showHint();
   }
 
   function stopPicking() {
     pickerActive = false;
     pickerRole = null;
     onPicked = null;
+    onCancelled = null;
     document.removeEventListener('mouseover', handleMouseOver, true);
     document.removeEventListener('click', handleClick, true);
+    document.removeEventListener('keydown', handleKeydown, true);
     document.body.classList.remove('d365ia-picking');
     highlight(null);
+    hideHint();
   }
 
   async function getBindings() {
