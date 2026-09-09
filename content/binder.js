@@ -17,6 +17,8 @@
     'suggestionItem',
     'fileTarget',
     'uploadButton',
+    'sheetSelectField',
+    'sheetOption',
     'entitiesGridRow',
     'runImportButton'
   ];
@@ -25,7 +27,12 @@
   // unique element — these need a selector that generalizes across
   // siblings (see domUtils.getGeneralizedListSelector), not one pinned to
   // the exact element clicked.
-  const LIST_ROLES = new Set(['sourceFormatOption', 'suggestionItem', 'entitiesGridRow']);
+  const LIST_ROLES = new Set([
+    'sourceFormatOption',
+    'suggestionItem',
+    'sheetOption',
+    'entitiesGridRow'
+  ]);
 
   let pickerActive = false;
   let pickerRole = null;

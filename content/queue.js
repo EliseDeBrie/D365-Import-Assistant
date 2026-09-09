@@ -38,11 +38,39 @@
         status: 'pending',
         matchedEntity: null,
         suggestions: [],
+        sheetNames: [],
+        selectedSheet: null,
         error: null
       }));
       items = items.concat(newItems);
+      sortPending();
       emit();
+
+      // Sheet names come from reading the workbook itself, which is async —
+      // the queue is usable meanwhile and the rows fill in as they resolve.
+      newItems.forEach((item) => {
+        D365IA.xlsxSheets.readSheetNames(item.file).then((sheetNames) => {
+          if (sheetNames.length < 2) return;
+          updateItem(item.id, { sheetNames, selectedSheet: sheetNames[0] });
+        });
+      });
+
       return newItems;
+    }
+
+    // A dropped selection arrives in whatever order the OS hands it over,
+    // but these files depend on each other and must import in their numbered
+    // order. Files already processed keep their place.
+    function sortPending() {
+      const settled = items.filter((it) => it.status !== 'pending');
+      const pending = items
+        .filter((it) => it.status === 'pending')
+        .sort((a, b) => matcher.compareNaturally(a.rawName, b.rawName));
+      items = settled.concat(pending);
+    }
+
+    function setSheet(id, sheetName) {
+      updateItem(id, { selectedSheet: sheetName });
     }
 
     function getItems() {
@@ -208,6 +236,26 @@
       return document.querySelectorAll(binding.selector).length;
     }
 
+    // A workbook with more than one sheet makes D365 ask which one to
+    // import. Best-effort: if the sheet control is bound and shows up, set
+    // it to the sheet chosen in the panel; otherwise leave it to the user.
+    async function applySheetSelection(bindings, item, options) {
+      if (!item.selectedSheet) return;
+      const binding = bindings.sheetSelectField;
+      if (!binding || !binding.selector) return;
+
+      const sheetEl = await domUtils
+        .waitFor(() => domUtils.queryVisible(binding.selector), {
+          timeout: (options && options.elementTimeout) || 5000
+        })
+        .catch(() => null);
+      if (!sheetEl) return;
+
+      if (domUtils.fieldText(sheetEl).toLowerCase() === item.selectedSheet.toLowerCase()) return;
+      const optionSelector = bindings.sheetOption && bindings.sheetOption.selector;
+      await pickFromDropdown(sheetEl, optionSelector, item.selectedSheet, options);
+    }
+
     // D365 re-renders the Add file panel after an upload and clears the
     // entity name. Starting the next file mid-render loses whatever is typed,
     // so wait for the field to come back empty before moving on.
@@ -338,6 +386,7 @@
 
         updateItem(id, { status: 'uploading' });
         await attachFile(bindings, item, options);
+        await applySheetSelection(bindings, item, options);
 
         if (baselineCount !== null) {
           await waitForGridRow(bindings, baselineCount, options);
@@ -425,6 +474,7 @@
       getItems,
       updateItem,
       removeItem,
+      setSheet,
       clear,
       run,
       pause,

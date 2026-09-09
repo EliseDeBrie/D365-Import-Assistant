@@ -102,6 +102,31 @@
   font-weight: 600;
   word-break: break-all;
 }
+.d365ia-item-seq {
+  display: inline-block;
+  min-width: 16px;
+  margin-right: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #e6e6e6;
+  color: #555;
+  font-size: 10px;
+  text-align: center;
+  vertical-align: middle;
+}
+.d365ia-item-sheet {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #555;
+}
+.d365ia-item-sheet select {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+}
 .d365ia-item-clean {
   color: #333;
 }

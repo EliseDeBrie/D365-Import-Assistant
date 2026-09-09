@@ -13,6 +13,16 @@ from the cleaned-up file name, then attaches the file — no typing per file.
    drop target, not just the small box — dropping on the launcher button
    works too, and it'll open the panel for you). Or click the panel's box to
    browse instead.
+
+   The queue is sorted by the file names' numbering, not by the arbitrary
+   order the OS hands the drop over, and each row shows its position. Numeric
+   runs sort numerically, so `10_` comes after `2_`, and `04.12PMD-` before
+   `80.ALOG.WM-`. Import order matters when the files depend on each other.
+
+   Workbooks are read locally to list their sheets (an `.xlsx` is a zip
+   holding `xl/workbook.xml`). Anything with more than one sheet gets a sheet
+   picker on its row, defaulting to the first sheet — that's what D365 will
+   be told to import.
 3. For each file, the file name is cleaned up (leading/trailing sequence
    numbers, dates/timestamps, and `_`/`-` separators are stripped — see
    *Cleaning rules* below) to produce a guessed entity name, and the source

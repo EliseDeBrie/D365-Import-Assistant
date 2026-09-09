@@ -150,10 +150,38 @@
     return { candidate: best, score: bestScore };
   }
 
+  // Orders file names the way their numbering reads rather than the way
+  // ASCII sorts, so "10_" follows "9_" and "04.12PMD-" precedes "80.ALOG.WM-".
+  // Import order matters: these files depend on each other, and a batch run
+  // in the wrong order fails.
+  function naturalChunks(text) {
+    return text.toLowerCase().match(/\d+|\D+/g) || [];
+  }
+
+  function compareNaturally(a, b) {
+    const left = naturalChunks(a);
+    const right = naturalChunks(b);
+
+    for (let i = 0; i < Math.min(left.length, right.length); i++) {
+      const x = left[i];
+      const y = right[i];
+      const bothNumeric = /^\d/.test(x) && /^\d/.test(y);
+
+      if (bothNumeric) {
+        const difference = parseInt(x, 10) - parseInt(y, 10);
+        if (difference) return difference;
+      } else if (x !== y) {
+        return x < y ? -1 : 1;
+      }
+    }
+    return left.length - right.length;
+  }
+
   D365IA.matcher = {
     DEFAULT_RULES,
     cleanFileName,
     scoreMatch,
-    bestMatch
+    bestMatch,
+    compareNaturally
   };
 })();

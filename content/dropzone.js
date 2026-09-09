@@ -103,14 +103,20 @@
 
     function render(items) {
       list.innerHTML = '';
-      items.forEach((item) => {
+      items.forEach((item, index) => {
         const li = document.createElement('li');
         li.className = `d365ia-item d365ia-status-${item.status}`;
 
         const nameDiv = document.createElement('div');
         nameDiv.className = 'd365ia-item-name';
         nameDiv.title = item.rawName;
-        nameDiv.textContent = item.rawName;
+
+        // Upload order is significant, so make each file's position explicit.
+        const seq = document.createElement('span');
+        seq.className = 'd365ia-item-seq';
+        seq.textContent = index + 1;
+        nameDiv.appendChild(seq);
+        nameDiv.appendChild(document.createTextNode(item.rawName));
 
         const cleanDiv = document.createElement('div');
         cleanDiv.className = 'd365ia-item-clean';
@@ -122,6 +128,31 @@
 
         li.appendChild(nameDiv);
         li.appendChild(cleanDiv);
+
+        // Only workbooks with more than one sheet get a picker — D365 asks
+        // which sheet to import for those, and defaults to the first here.
+        if (item.sheetNames && item.sheetNames.length > 1) {
+          const sheetRow = document.createElement('div');
+          sheetRow.className = 'd365ia-item-sheet';
+
+          const label = document.createElement('span');
+          label.textContent = 'Sheet:';
+
+          const sheetSelect = document.createElement('select');
+          item.sheetNames.forEach((name) => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            if (name === item.selectedSheet) opt.selected = true;
+            sheetSelect.appendChild(opt);
+          });
+          sheetSelect.addEventListener('change', () => queue.setSheet(item.id, sheetSelect.value));
+
+          sheetRow.appendChild(label);
+          sheetRow.appendChild(sheetSelect);
+          li.appendChild(sheetRow);
+        }
+
         li.appendChild(statusDiv);
 
         if (item.status === 'needs-review' && item.suggestions && item.suggestions.length) {

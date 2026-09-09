@@ -11,6 +11,8 @@
     suggestionItem: 'One row in the entity name suggestions',
     fileTarget: 'File input / drop target',
     uploadButton: 'Upload button',
+    sheetSelectField: 'Sheet picker shown for multi-sheet workbooks',
+    sheetOption: 'One item in that sheet picker’s open list',
     entitiesGridRow: 'One row in the uploaded-entities grid',
     runImportButton: 'Page-level Import/Run button'
   };
@@ -27,12 +29,20 @@
       'Alt+click the visible "Upload data file" box — the hidden input that actually takes the file is found from there automatically.',
     uploadButton:
       'The "Upload and add" button. Bind it even though it normally opens a file-picker dialog — that dialog is intercepted and answered with the dropped file, so it won\'t appear.',
+    sheetSelectField:
+      'Only needed if your workbooks have multiple sheets. Upload one manually to make the picker appear, then Alt+click it. The sheet itself is chosen per file in the queue.',
+    sheetOption: 'Open that sheet picker, then Alt+click one sheet name in the list.',
     entitiesGridRow:
       'Add one file manually first so a row exists to click. Used to detect success — falls back to a fixed pause if left unbound.',
     runImportButton: 'Only clicked if auto-run is turned on in Settings; otherwise never touched.'
   };
 
-  const OPTIONAL_ROLES = new Set(['entitiesGridRow', 'runImportButton']);
+  const OPTIONAL_ROLES = new Set([
+    'sheetSelectField',
+    'sheetOption',
+    'entitiesGridRow',
+    'runImportButton'
+  ]);
 
   let modalEl = null;
 
