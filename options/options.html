@@ -9,7 +9,10 @@
 
     <section>
       <h2>Filename cleaning rules</h2>
-      <label><input type="checkbox" id="stripLeadingNumbers" /> Strip leading numbers (e.g. "01_Customers.xlsx")</label>
+      <label
+        ><input type="checkbox" id="stripLeadingNumbers" /> Strip leading numbers and code prefixes
+        (e.g. "01_Customers.xlsx", "02B.03SYS-Inventory adjustment journal names.xlsx")</label
+      >
       <label><input type="checkbox" id="stripTrailingNumbers" /> Strip trailing numbers (e.g. "Customers_01.xlsx")</label>
       <label><input type="checkbox" id="stripDates" /> Strip dates/timestamps (e.g. "Customers_20240115.xlsx")</label>
       <label><input type="checkbox" id="stripVersionSuffixes" /> Strip version words (v2, (2), copy, final, draft)</label>

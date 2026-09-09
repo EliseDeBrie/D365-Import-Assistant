@@ -83,6 +83,24 @@ real click sequence:
 4. Bindings are saved (`chrome.storage.sync`) and reused automatically next
    time — you shouldn't need to redo this unless D365 changes its layout.
 
+### Why bindings prefer `data-dyn-controlname`
+
+D365 stamps instance counters into element ids — `31_5_SourceNameControl_input`
+— and regenerates them every time it rebuilds a control. The "Add file" panel
+is torn down and rebuilt on every open, so a plain `#id` selector captured
+during setup is stale by the next run and matches nothing. Selector
+generation therefore prefers, in order:
+
+1. the element's own `data-dyn-controlname`,
+2. the nearest ancestor's `data-dyn-controlname` plus a short path down to it,
+3. an id matched by its stable suffix (`[id$="_SourceNameControl_input"]`),
+4. `name`, then a plain id, then a DOM path.
+
+If a binding still goes stale, check what it saved in Options → Field
+bindings: anything that looks like a bare `#12_3_Something` is the fragile
+case, and rebinding by clicking slightly higher up (on the control's box
+rather than deep inside it) usually lands on an element with a control name.
+
 ### Notes on binding a list (suggestion row / dropdown option / grid row)
 
 These three roles all need to match *every* item in a repeating list, not
@@ -102,7 +120,10 @@ something unrelated on the page and the selector needs a manual edit
 Configurable in the extension's **Options** page (right-click the toolbar
 icon → Options, or from the popup):
 
-- Strip leading numbers — `01_Customers.xlsx` → `Customers`
+- Strip leading numbers and code prefixes — `01_Customers.xlsx` → `Customers`,
+  `02B.03SYS-Inventory adjustment journal names.xlsx` → `Inventory adjustment
+  journal names`. Any leading token starting with a digit is treated as a
+  numbering/classification code.
 - Strip trailing numbers — `Customers_01.xlsx` → `Customers`
 - Strip dates/timestamps — `Customers_20240115.xlsx` → `Customers`
 - Strip version words (`v2`, `(2)`, `copy`, `final`, `draft`) — off by default

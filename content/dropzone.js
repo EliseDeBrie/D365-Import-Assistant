@@ -68,7 +68,7 @@
       fileInput.value = '';
     });
 
-    const REQUIRED_ROLES = ['addFileButton', 'sourceFormatField', 'entityNameField', 'fileTarget', 'uploadButton'];
+    const REQUIRED_ROLES = ['addFileButton', 'sourceFormatField', 'entityNameField', 'fileTarget'];
 
     runBtn.addEventListener('click', async () => {
       const bindings = await getBindings();

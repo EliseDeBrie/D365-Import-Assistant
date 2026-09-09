@@ -20,11 +20,13 @@
     sourceFormatField:
       'While the list is still CLOSED: Alt+click anywhere in the box (the value/placeholder text is fine — not specifically the little arrow). Don\'t open it first.',
     sourceFormatOption:
-      'Click the box normally (no Alt) to open its list, THEN Alt+click one item inside it, e.g. "Excel". This is a different element from the box itself.',
+      'Click the box normally (no Alt) to open its list, THEN Alt+click one item inside it, e.g. "Excel". A different element from the box itself. Can be left unbound — the value is then typed into the box instead.',
     entityNameField: 'Pick a format first so this field appears, then Alt+click it.',
     suggestionItem: 'Type a few letters into the entity field to open the list first.',
-    fileTarget: 'The row’s file input or drop target.',
-    uploadButton: 'The row’s Upload button.',
+    fileTarget:
+      'Alt+click the visible "Upload data file" box — the hidden input that actually takes the file is found from there automatically.',
+    uploadButton:
+      'Optional. The file is attached directly, so leave this unbound if the button opens a file-picker dialog ("Browse"). Bind it only if D365 needs an explicit commit click.',
     entitiesGridRow:
       'Add one file manually first so a row exists to click. Used to detect success — falls back to a fixed pause if left unbound.',
     runImportButton: 'Only clicked if auto-run is turned on in Settings; otherwise never touched.'

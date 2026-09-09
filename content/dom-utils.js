@@ -26,7 +26,10 @@
 
   // Simulates a user typing into a field so frameworks that listen for
   // input/change (D365's control framework included) pick up the value.
-  function typeIntoField(inputEl, text) {
+  // Accepts a control wrapper as well as the input itself, since that's
+  // what a user is likely to have clicked when binding.
+  function typeIntoField(el, text) {
+    const inputEl = resolveTextInput(el);
     inputEl.focus();
     setNativeValue(inputEl, '');
     fireEvent(inputEl, 'input');
@@ -34,6 +37,18 @@
     fireEvent(inputEl, 'input');
     fireEvent(inputEl, 'keyup', { isKeyboard: true, key: text.slice(-1) });
     fireEvent(inputEl, 'change');
+    return inputEl;
+  }
+
+  // Commits a typed value in a D365 combo/lookup without picking from the
+  // list, for controls that resolve what you typed on blur.
+  function commitField(el) {
+    const inputEl = resolveTextInput(el);
+    ['keydown', 'keyup'].forEach((type) =>
+      fireEvent(inputEl, type, { isKeyboard: true, key: 'Enter' })
+    );
+    fireEvent(inputEl, 'change');
+    inputEl.blur();
   }
 
   // Attaches a real File object to a native <input type="file">, as if the
@@ -78,25 +93,116 @@
     });
   }
 
-  // Builds a selector for a single, specific element that survives page
-  // reloads: prefers D365's own data-dyn-controlname attribute, falls back
-  // to id, then a DOM path indexed with :nth-of-type so it targets exactly
-  // this element and no sibling.
-  function getSelector(el) {
-    if (el.getAttribute && el.getAttribute('data-dyn-controlname')) {
-      return `[data-dyn-controlname="${el.getAttribute('data-dyn-controlname')}"]`;
+  // D365 stamps instance counters into element ids ("31_5_SourceNameControl_input")
+  // and regenerates them every time it rebuilds a control — the Add file panel
+  // is torn down and rebuilt on every open — so a raw #id selector goes stale
+  // immediately. Match on the stable suffix instead.
+  const GENERATED_ID_RE = /^\d+_\d+_(.+)$/;
+
+  // Classes this extension itself adds while picking. They must never end up
+  // in a saved selector: d365ia-hover-highlight only exists while the mouse
+  // is over the element during binding, so any selector containing it can
+  // never match again afterwards.
+  const OWN_CLASS_RE = /^d365ia-/;
+
+  function usefulClasses(el) {
+    if (!el.className || typeof el.className !== 'string') return [];
+    return el.className
+      .trim()
+      .split(/\s+/)
+      .filter((c) => c && !OWN_CLASS_RE.test(c));
+  }
+
+  function attrSelector(name, value) {
+    return `[${name}="${String(value).replace(/"/g, '\\"')}"]`;
+  }
+
+  function classSelector(el) {
+    const classes = usefulClasses(el);
+    if (!classes.length) return null;
+    return el.tagName.toLowerCase() + classes.map((c) => '.' + CSS.escape(c)).join('');
+  }
+
+  // A short path from a control wrapper down to the element inside it. The
+  // wrapper's internal structure survives re-instantiation even though its
+  // generated ids don't, so this stays valid across panel rebuilds.
+  function descendantSelector(ancestor, el) {
+    const tag = el.tagName.toLowerCase();
+    const candidates = [];
+    if (el.getAttribute('name')) candidates.push(tag + attrSelector('name', el.getAttribute('name')));
+    if (el.getAttribute('role')) candidates.push(tag + attrSelector('role', el.getAttribute('role')));
+    if (el.tagName === 'INPUT' && el.type) candidates.push(`${tag}[type="${el.type}"]`);
+    const cls = classSelector(el);
+    if (cls) candidates.push(cls);
+    candidates.push(tag);
+
+    for (const candidate of candidates) {
+      const matches = ancestor.querySelectorAll(candidate);
+      if (matches.length === 1 && matches[0] === el) return candidate;
     }
-    if (el.id) return `#${CSS.escape(el.id)}`;
+
+    const parts = [];
+    let node = el;
+    let depth = 0;
+    while (node && node !== ancestor && depth < 10) {
+      const parent = node.parentElement;
+      if (!parent) return null;
+      parts.unshift(`:nth-child(${Array.prototype.indexOf.call(parent.children, node) + 1})`);
+      node = parent;
+      depth++;
+    }
+    return node === ancestor && parts.length ? '> ' + parts.join(' > ') : null;
+  }
+
+  function nearestControlName(el) {
+    let node = el;
+    let depth = 0;
+    while (node && node.nodeType === 1 && depth < 10) {
+      const name = node.getAttribute && node.getAttribute('data-dyn-controlname');
+      if (name) return { node, name };
+      node = node.parentElement;
+      depth++;
+    }
+    return null;
+  }
+
+  // Builds a selector for a single, specific element, strongly preferring
+  // handles that survive D365 rebuilding the control: its own
+  // data-dyn-controlname, then the nearest ancestor's, then an id matched by
+  // its stable suffix. A raw id or DOM path is the last resort.
+  function getSelector(el) {
+    const own = el.getAttribute && el.getAttribute('data-dyn-controlname');
+    if (own) return attrSelector('data-dyn-controlname', own);
+
+    const control = nearestControlName(el);
+    if (control) {
+      const base = attrSelector('data-dyn-controlname', control.name);
+      const rel = descendantSelector(control.node, el);
+      const combined = rel ? `${base} ${rel}` : base;
+      if (document.querySelector(combined) === el) return combined;
+      return base;
+    }
+
+    if (el.id) {
+      const generated = GENERATED_ID_RE.exec(el.id);
+      if (generated) {
+        const suffixSelector = `[id$="_${generated[1]}"]`;
+        if (document.querySelector(suffixSelector) === el) return suffixSelector;
+      } else {
+        return `#${CSS.escape(el.id)}`;
+      }
+    }
+
+    if (el.getAttribute && el.getAttribute('name')) {
+      const named = el.tagName.toLowerCase() + attrSelector('name', el.getAttribute('name'));
+      if (document.querySelector(named) === el) return named;
+    }
 
     const path = [];
     let node = el;
     let depth = 0;
     while (node && node.nodeType === 1 && depth < 6) {
-      let selector = node.tagName.toLowerCase();
-      if (node.className && typeof node.className === 'string') {
-        const cls = node.className.trim().split(/\s+/).slice(0, 2).join('.');
-        if (cls) selector += '.' + CSS.escape(cls).replace(/\\\./g, '.');
-      }
+      let selector = classSelector(node) || node.tagName.toLowerCase();
       const parent = node.parentElement;
       if (parent) {
         const siblings = Array.from(parent.children).filter((c) => c.tagName === node.tagName);
@@ -118,32 +224,92 @@
   // this, binding "the 2nd suggestion in the list" would only ever match
   // that exact position and never generalize to picking a different item.
   function getGeneralizedListSelector(el) {
-    if (el.className && typeof el.className === 'string') {
-      const classes = el.className.trim().split(/\s+/).filter(Boolean);
-      if (classes.length) {
-        const selector = el.tagName.toLowerCase() + '.' + classes.map((c) => CSS.escape(c)).join('.');
-        if (document.querySelectorAll(selector).length >= 1) return selector;
-      }
-    }
+    const cls = classSelector(el);
+    if (cls && document.querySelectorAll(cls).length >= 1) return cls;
+
     if (el.getAttribute && el.getAttribute('role')) {
       return `${el.tagName.toLowerCase()}[role="${el.getAttribute('role')}"]`;
     }
+
+    const control = nearestControlName(el);
+    if (control && control.node !== el) {
+      return `${attrSelector('data-dyn-controlname', control.name)} ${el.tagName.toLowerCase()}`;
+    }
+
     const parent = el.parentElement;
-    if (parent && parent.className && typeof parent.className === 'string') {
-      const pClass = parent.className.trim().split(/\s+/).filter(Boolean)[0];
+    if (parent) {
+      const pClass = usefulClasses(parent)[0];
       if (pClass) return `.${CSS.escape(pClass)} > ${el.tagName.toLowerCase()}`;
     }
     return el.tagName.toLowerCase();
+  }
+
+  function isVisible(el) {
+    if (!el) return false;
+    // File inputs are deliberately hidden by the page; they're still usable.
+    if (el.tagName === 'INPUT' && el.type === 'file') return true;
+    if (el.getClientRects().length === 0) return false;
+    const style = window.getComputedStyle(el);
+    return style.visibility !== 'hidden' && style.display !== 'none';
+  }
+
+  // D365 can leave a torn-down copy of a panel in the DOM behind the live
+  // one, so prefer the last visible match rather than the first match.
+  function queryVisible(selector) {
+    let all;
+    try {
+      all = Array.from(document.querySelectorAll(selector));
+    } catch (e) {
+      return null;
+    }
+    const visible = all.filter(isVisible);
+    return visible.length ? visible[visible.length - 1] : null;
+  }
+
+  function queryAllVisible(selector) {
+    try {
+      return Array.from(document.querySelectorAll(selector)).filter(isVisible);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function resolveTextInput(el) {
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return el;
+    return el.querySelector('input, textarea') || el;
+  }
+
+  function resolveSelect(el) {
+    if (el.tagName === 'SELECT') return el;
+    return el.querySelector('select');
+  }
+
+  // Finds the real <input type="file"> behind an upload control. Users bind
+  // the visible box or button, but the input that actually accepts a file is
+  // usually a hidden sibling. Never matches this extension's own picker.
+  function resolveFileInput(el) {
+    const SELECTOR = 'input[type="file"]:not(#d365ia-file-input)';
+    if (el.tagName === 'INPUT' && el.type === 'file') return el;
+    const inside = el.querySelector && el.querySelector(SELECTOR);
+    if (inside) return inside;
+
+    let node = el.parentElement;
+    let depth = 0;
+    while (node && depth < 8) {
+      const found = node.querySelector(SELECTOR);
+      if (found) return found;
+      node = node.parentElement;
+      depth++;
+    }
+
+    const all = document.querySelectorAll(SELECTOR);
+    return all.length === 1 ? all[0] : null;
   }
 
   function clickElement(el) {
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
     el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  }
-
-  function isNativeSelect(el) {
-    return el && el.tagName === 'SELECT';
   }
 
   // Sets a native <select>'s value by matching one of its options' visible
@@ -164,13 +330,19 @@
     setNativeValue,
     fireEvent,
     typeIntoField,
+    commitField,
     dropFileOnInput,
     dropFileOnDropTarget,
     waitFor,
     getSelector,
     getGeneralizedListSelector,
     clickElement,
-    isNativeSelect,
-    selectNativeOption
+    selectNativeOption,
+    isVisible,
+    queryVisible,
+    queryAllVisible,
+    resolveTextInput,
+    resolveSelect,
+    resolveFileInput
   };
 })();

@@ -24,8 +24,17 @@
 
   const VERSION_TOKEN_RES = [/^v\d+$/i, /^\(\d+\)$/, /^final$/i, /^copy$/i, /^draft$/i];
 
+  // Leading classification codes like "01", "02B.03SYS" or "80.ALOG.WM".
+  // Anything starting with a digit at the front of a file name is a
+  // numbering/classification prefix, never part of an entity name.
+  const CODE_PREFIX_RE = /^\d[\w.]*$/;
+
   function isPureNumberToken(t) {
     return /^\d+$/.test(t);
+  }
+
+  function isCodePrefixToken(t) {
+    return CODE_PREFIX_RE.test(t);
   }
 
   function isDateToken(t) {
@@ -51,7 +60,7 @@
 
     while (
       tokens.length > 1 &&
-      ((rules.stripLeadingNumbers && isPureNumberToken(tokens[0])) ||
+      ((rules.stripLeadingNumbers && isCodePrefixToken(tokens[0])) ||
         (rules.stripDates && isDateToken(tokens[0])) ||
         (rules.stripVersionSuffixes && isVersionToken(tokens[0])))
     ) {

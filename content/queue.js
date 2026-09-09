@@ -75,51 +75,76 @@
         throw new Error(`"${role}" isn't bound yet — open Setup fields.`);
       }
       try {
-        return await domUtils.waitFor(() => document.querySelector(binding.selector), {
+        return await domUtils.waitFor(() => domUtils.queryVisible(binding.selector), {
           timeout: (options && options.elementTimeout) || 5000
         });
       } catch (e) {
-        throw new Error(`Bound element for "${role}" didn't show up on the page in time.`);
+        throw new Error(
+          `Bound element for "${role}" didn't show up on the page in time (selector: ${binding.selector}). Re-bind it in Setup fields.`
+        );
       }
     }
 
-    // Opens a dropdown/select control and picks the option whose text best
-    // matches desiredText. Used for the Source data format field, but not
-    // tied to it specifically.
+    function findBoundEl(bindings, role) {
+      const binding = bindings[role];
+      if (!binding || !binding.selector) return null;
+      return domUtils.queryVisible(binding.selector);
+    }
+
+    // Sets a dropdown to desiredText. Native <select> is set directly;
+    // otherwise it opens the control and clicks the best-matching option if
+    // an option selector is bound, and falls back to typing the value into
+    // the combo box (D365 combos resolve what you type) when it isn't.
     async function pickFromDropdown(fieldEl, optionSelector, desiredText, options) {
-      if (domUtils.isNativeSelect(fieldEl)) {
-        if (!domUtils.selectNativeOption(fieldEl, desiredText)) {
+      const selectEl = domUtils.resolveSelect(fieldEl);
+      if (selectEl) {
+        if (!domUtils.selectNativeOption(selectEl, desiredText)) {
           throw new Error(`No option matching "${desiredText}" in the dropdown.`);
         }
         return desiredText;
       }
 
       domUtils.clickElement(fieldEl);
-      await domUtils.waitFor(() => document.querySelectorAll(optionSelector).length > 0, {
-        timeout: options.elementTimeout || 5000
-      });
-      const optionEls = Array.from(document.querySelectorAll(optionSelector));
-      const texts = optionEls.map((el) => el.textContent.trim());
-      const { candidate, score } = matcher.bestMatch(desiredText, texts);
-      if (!candidate || score < 0.5) {
-        throw new Error(`Couldn't find a "${desiredText}" option in the dropdown.`);
+
+      if (optionSelector) {
+        try {
+          await domUtils.waitFor(() => domUtils.queryAllVisible(optionSelector).length > 0, {
+            timeout: options.elementTimeout || 5000
+          });
+          const optionEls = domUtils.queryAllVisible(optionSelector);
+          const texts = optionEls.map((el) => el.textContent.trim());
+          const { candidate, score } = matcher.bestMatch(desiredText, texts);
+          if (candidate && score >= 0.5) {
+            const chosenEl = optionEls.find((el) => el.textContent.trim() === candidate);
+            domUtils.clickElement(chosenEl);
+            return candidate;
+          }
+        } catch (e) {
+          // Fall through to typing the value instead.
+        }
       }
-      const chosenEl = optionEls.find((el) => el.textContent.trim() === candidate);
-      domUtils.clickElement(chosenEl);
-      return candidate;
+
+      domUtils.typeIntoField(fieldEl, desiredText);
+      domUtils.commitField(fieldEl);
+      return desiredText;
     }
 
     function selectSuggestion(suggestionSelector, candidateText) {
-      const els = Array.from(document.querySelectorAll(suggestionSelector));
-      const el = els.find((e) => e.textContent.trim() === candidateText);
+      const el = domUtils
+        .queryAllVisible(suggestionSelector)
+        .find((e) => e.textContent.trim() === candidateText);
       if (!el) return false;
       domUtils.clickElement(el);
       return true;
     }
 
+    // The visible "Upload data file" box isn't the input that accepts a
+    // file — the real <input type="file"> is hidden nearby, so bind either
+    // and let this find the usable one.
     function attachFile(fileTargetEl, file) {
-      if (fileTargetEl.tagName === 'INPUT' && fileTargetEl.type === 'file') {
-        domUtils.dropFileOnInput(fileTargetEl, file);
+      const fileInput = domUtils.resolveFileInput(fileTargetEl);
+      if (fileInput) {
+        domUtils.dropFileOnInput(fileInput, file);
       } else {
         domUtils.dropFileOnDropTarget(fileTargetEl, file);
       }
@@ -142,18 +167,21 @@
       let suggestions = [];
       if (suggestionSelector) {
         try {
-          await domUtils.waitFor(() => document.querySelectorAll(suggestionSelector).length > 0, {
+          await domUtils.waitFor(() => domUtils.queryAllVisible(suggestionSelector).length > 0, {
             timeout: options.elementTimeout || 5000
           });
-          suggestions = Array.from(document.querySelectorAll(suggestionSelector)).map((el) =>
-            el.textContent.trim()
-          );
+          suggestions = domUtils.queryAllVisible(suggestionSelector).map((el) => el.textContent.trim());
         } catch (e) {
           suggestions = [];
         }
       }
 
-      if (suggestions.length === 0) return { needsReview: false };
+      // No suggestion list to pick from — commit what was typed and let D365
+      // validate it rather than leaving the field half-filled.
+      if (suggestions.length === 0) {
+        domUtils.commitField(entityFieldEl);
+        return { needsReview: false };
+      }
 
       const { candidate, score } = matcher.bestMatch(item.cleanedName, suggestions);
       if (score >= (options.matchThreshold || 0.75) && selectSuggestion(suggestionSelector, candidate)) {
@@ -179,15 +207,14 @@
       try {
         const baselineCount = countGridRows(bindings);
 
-        domUtils.clickElement(await requireBoundEl(bindings, 'addFileButton', options));
+        // Clicking "Add file" while its panel is already open closes it
+        // again, so only click when the panel isn't showing.
+        if (!findBoundEl(bindings, 'sourceFormatField')) {
+          domUtils.clickElement(await requireBoundEl(bindings, 'addFileButton', options));
+        }
 
         const formatFieldEl = await requireBoundEl(bindings, 'sourceFormatField', options);
         const formatOptionSelector = bindings.sourceFormatOption && bindings.sourceFormatOption.selector;
-        if (!formatOptionSelector && !domUtils.isNativeSelect(formatFieldEl)) {
-          throw new Error(
-            '"sourceFormatOption" isn\'t bound — open Setup fields, open the Source data format dropdown, and Alt+click one option (e.g. "Excel") to bind it.'
-          );
-        }
         await pickFromDropdown(formatFieldEl, formatOptionSelector, item.sourceFormat, options);
 
         const matchResult = await matchEntityName(id, item, bindings, options);
@@ -196,7 +223,10 @@
         attachFile(await requireBoundEl(bindings, 'fileTarget', options), item.file);
 
         updateItem(id, { status: 'uploading' });
-        domUtils.clickElement(await requireBoundEl(bindings, 'uploadButton', options));
+        // Optional: the file is attached to the input directly, so this is
+        // only needed where D365 waits for an explicit commit click.
+        const uploadEl = findBoundEl(bindings, 'uploadButton');
+        if (uploadEl) domUtils.clickElement(uploadEl);
 
         if (baselineCount !== null) {
           await domUtils.waitFor(() => countGridRows(bindings) > baselineCount, {
@@ -259,7 +289,8 @@
         const baselineCount = countGridRows(bindings);
         attachFile(await requireBoundEl(bindings, 'fileTarget', options), item.file);
         updateItem(id, { status: 'uploading', matchedEntity: chosenSuggestionText });
-        domUtils.clickElement(await requireBoundEl(bindings, 'uploadButton', options));
+        const uploadEl = findBoundEl(bindings, 'uploadButton');
+        if (uploadEl) domUtils.clickElement(uploadEl);
 
         if (baselineCount !== null) {
           await domUtils.waitFor(() => countGridRows(bindings) > baselineCount, {

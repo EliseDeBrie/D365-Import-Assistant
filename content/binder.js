@@ -127,9 +127,22 @@
     hideHint();
   }
 
+  // Older versions could bake this extension's own hover-highlight class
+  // into a saved selector, which then never matched anything again. Strip it
+  // from whatever is already stored rather than making people rebind.
+  function sanitizeSelector(selector) {
+    return selector.replace(/\.d365ia-[\w-]+/g, '').trim();
+  }
+
   async function getBindings() {
     const data = await chrome.storage.sync.get('bindings');
-    return data.bindings || {};
+    const bindings = data.bindings || {};
+    Object.keys(bindings).forEach((role) => {
+      if (bindings[role] && bindings[role].selector) {
+        bindings[role].selector = sanitizeSelector(bindings[role].selector);
+      }
+    });
+    return bindings;
   }
 
   async function saveBinding(role, selector, meta) {
