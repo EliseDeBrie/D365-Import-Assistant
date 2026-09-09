@@ -313,21 +313,23 @@
         }
       }
 
-      // This environment's own entity list (Load/Refresh in the panel) is
-      // ground truth when it's loaded, and a stronger signal than whatever a
-      // live suggestion list happens to contain text matching. Typed text
-      // never changes because of this — only which candidate counts as a
-      // confident match does.
+      // The environment's own entity list (Load/Refresh in the panel) uses
+      // OData's technical entity names ("OperationalSitesV2"), while D365's
+      // own lookup shows display labels ("Sites V2") — often genuinely
+      // different strings for the same entity, not a sign anything is
+      // wrong. So this is only ever an extra signal when picking among
+      // live suggestions that D365 itself is already offering, never a
+      // reason to reject what D365 has actually put in the field.
       const validated = D365IA.entityList.validate(item.cleanedName);
       const trustedName =
         validated.status === 'match' || !validated.name ? item.cleanedName : validated.name;
 
       // No usable suggestion list — either unbound, or bound onto something
-      // that isn't a real list of rows (see queryListCandidates). Typed text
-      // sitting in the field is not proof D365 actually selected a valid
-      // entity, so don't treat a non-empty field as success when the entity
-      // list disagrees; that combination is exactly what leaves the upload
-      // box never appearing two steps later.
+      // that isn't a real list of rows (see queryListCandidates). Best
+      // effort: commit what was typed and trust D365 kept it if the field
+      // is non-empty. There's no reliable local signal for "D365 silently
+      // rejected this" short of the field going empty, which is already
+      // handled below.
       if (suggestions.length === 0) {
         let text = await typeAndCommit(entityFieldEl, item.cleanedName);
 
@@ -339,12 +341,6 @@
         if (!text) {
           throw new Error(
             `D365 didn't accept the entity name "${item.cleanedName}" — it may not match an entity in this environment. Set it by hand to check the exact name, or bind "one row in the entity name suggestions" so a match can be picked from the list.`
-          );
-        }
-
-        if (validated.status !== 'match' && validated.status !== 'unknown') {
-          throw new Error(
-            `Typed "${item.cleanedName}" into the entity field, but there was no suggestion list to confirm it actually got selected (only committed text, which D365 may silently reject). This environment's entity list doesn't have an exact match either — closest is "${validated.name}". Bind "one row in the entity name suggestions" (click an actual result row, not the search/filter box) so a real match can be picked, or type the entity by hand to check the exact name.`
           );
         }
 

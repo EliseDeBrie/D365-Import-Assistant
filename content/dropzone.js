@@ -217,12 +217,15 @@
           if (check.status === 'match') {
             badge.textContent = 'entity found';
           } else if (check.status === 'close') {
-            badge.textContent = `closest: ${check.name}`;
+            badge.textContent = `entity list: ${check.name}?`;
           } else {
-            badge.textContent = check.name ? `no match (closest: ${check.name})` : 'no match';
+            badge.textContent = check.name ? `entity list: ${check.name}?` : 'not in entity list';
           }
           badge.title =
-            'Checked against this environment\'s OData entity list. Names are compared ignoring case and spacing.';
+            'This is a hint, not an error: the entity list uses OData\'s technical names ' +
+            '("OperationalSitesV2"), while D365\'s own lookup shows display labels ("Sites V2") ' +
+            '— those are often legitimately different strings for the same entity. Check what ' +
+            'D365 itself shows in the Entity name field before assuming this is wrong.';
           cleanDiv.appendChild(badge);
         }
 

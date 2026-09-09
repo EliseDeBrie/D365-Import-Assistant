@@ -147,22 +147,21 @@ list is right for *this* environment rather than a hardcoded one that drifts
 with version and customizations. It's cached in `chrome.storage.local`
 (thousands of names exceed `storage.sync`'s per-item quota).
 
-Each queued file then shows whether its cleaned name corresponds to a real
-entity, so a bad guess surfaces before a long run rather than partway
-through. Comparison ignores case and spacing, because OData spells an entity
-`CustomerGroups` where the import form labels it `Customer groups`.
+Each queued file then shows a hint badge for whether its cleaned name
+corresponds to a real entity. **Treat it as a hint, not an error report**:
+OData's service document lists *technical* entity names (`OperationalSitesV2`),
+while D365's own Entity name lookup shows *display labels* (`Sites V2`) —
+often legitimately different strings for the same entity. A "not in entity
+list" badge is common and frequently harmless; what matters is what D365
+itself shows in the Entity name field once a file has run.
 
-What gets *typed* into D365 is still what the queue shows — the OData
-spelling is deliberately not substituted in, since the import form's lookup
-wants the label form. But it's more than a passive warning: when picking
-which live D365 suggestion to click, a validated real entity name is used as
-an extra signal alongside the typed guess, and picking the best-scoring of
-the two. And if no live suggestion list is available at all to confirm
-anything got properly selected (see "Notes on binding a list" below), a
-typed name the entity list doesn't recognize stops the file with an error
-instead of being silently accepted — a name can sit in the field, non-empty,
-without D365 having actually accepted it as a real selection, which otherwise
-only surfaces two steps later as a mysterious missing upload box.
+What gets *typed* into D365 is always what the queue shows — the OData
+spelling is never substituted in. The one place the entity list actually
+affects automation: when D365 *is* offering a live list of suggestions to
+pick from, a validated real name is tried as an extra candidate alongside the
+typed guess, and whichever scores better against those live suggestions
+wins. It never overrides or rejects what D365 itself already put in the
+field — the technical/label mismatch means it isn't reliable enough for that.
 
 ## Cleaning rules
 
