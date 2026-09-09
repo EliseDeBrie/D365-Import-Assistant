@@ -284,6 +284,19 @@
     }
   }
 
+  const LIST_ITEM_EXCLUDED_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+
+  // Elements in a repeating list (a suggestion, a dropdown option, a grid
+  // row) are never themselves form controls. A selector that resolves to
+  // inputs was bound onto a filter/search box or the field itself rather
+  // than an actual list item — clicking one would hit something arbitrary,
+  // so this is the one filter both the automation and the setup dialog's
+  // health check apply, so what the dialog reports matches what will
+  // actually work at runtime.
+  function queryListCandidates(selector) {
+    return queryAllVisible(selector).filter((el) => !LIST_ITEM_EXCLUDED_TAGS.has(el.tagName));
+  }
+
   function resolveTextInput(el) {
     if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return el;
     return el.querySelector('input, textarea') || el;
@@ -399,6 +412,7 @@
     isVisible,
     queryVisible,
     queryAllVisible,
+    queryListCandidates,
     resolveTextInput,
     resolveSelect,
     resolveFileInput,

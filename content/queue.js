@@ -119,15 +119,8 @@
       return domUtils.queryVisible(binding.selector);
     }
 
-    // Elements in a suggestion/option list are never form controls. A
-    // binding that resolves to inputs was mis-picked (it typically matches
-    // every field on the page), and acting on it would click something
-    // arbitrary — so ignore those and let the caller fall back to typing.
     function listCandidates(selector) {
-      if (!selector) return [];
-      return domUtils
-        .queryAllVisible(selector)
-        .filter((el) => !['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+      return selector ? domUtils.queryListCandidates(selector) : [];
     }
 
     // Opens the Add file panel, retrying with a native click if D365 ignored
@@ -320,10 +313,21 @@
         }
       }
 
-      // No suggestion list to pick from — commit what was typed and confirm
-      // D365 kept it. The upload box only renders once a valid entity is
-      // selected, so an empty field here is the real failure, not a missing
-      // upload control later.
+      // This environment's own entity list (Load/Refresh in the panel) is
+      // ground truth when it's loaded, and a stronger signal than whatever a
+      // live suggestion list happens to contain text matching. Typed text
+      // never changes because of this — only which candidate counts as a
+      // confident match does.
+      const validated = D365IA.entityList.validate(item.cleanedName);
+      const trustedName =
+        validated.status === 'match' || !validated.name ? item.cleanedName : validated.name;
+
+      // No usable suggestion list — either unbound, or bound onto something
+      // that isn't a real list of rows (see queryListCandidates). Typed text
+      // sitting in the field is not proof D365 actually selected a valid
+      // entity, so don't treat a non-empty field as success when the entity
+      // list disagrees; that combination is exactly what leaves the upload
+      // box never appearing two steps later.
       if (suggestions.length === 0) {
         let text = await typeAndCommit(entityFieldEl, item.cleanedName);
 
@@ -338,13 +342,23 @@
           );
         }
 
+        if (validated.status !== 'match' && validated.status !== 'unknown') {
+          throw new Error(
+            `Typed "${item.cleanedName}" into the entity field, but there was no suggestion list to confirm it actually got selected (only committed text, which D365 may silently reject). This environment's entity list doesn't have an exact match either — closest is "${validated.name}". Bind "one row in the entity name suggestions" (click an actual result row, not the search/filter box) so a real match can be picked, or type the entity by hand to check the exact name.`
+          );
+        }
+
         updateItem(id, { matchedEntity: text });
         return { needsReview: false };
       }
 
-      const { candidate, score } = matcher.bestMatch(item.cleanedName, suggestions);
-      if (score >= (options.matchThreshold || 0.75) && selectSuggestion(suggestionSelector, candidate)) {
-        updateItem(id, { matchedEntity: candidate });
+      const threshold = options.matchThreshold || 0.75;
+      const direct = matcher.bestMatch(item.cleanedName, suggestions);
+      const trusted = trustedName === item.cleanedName ? direct : matcher.bestMatch(trustedName, suggestions);
+      const best = trusted.score >= direct.score ? trusted : direct;
+
+      if (best.score >= threshold && selectSuggestion(suggestionSelector, best.candidate)) {
+        updateItem(id, { matchedEntity: best.candidate });
         return { needsReview: false };
       }
 

@@ -25,14 +25,16 @@
     sourceFormatOption:
       'Click the box normally (no Alt) to open its list, THEN Alt+click one item inside it, e.g. "Excel". A different element from the box itself. Can be left unbound — the value is then typed into the box instead.',
     entityNameField: 'Pick a format first so this field appears, then Alt+click it.',
-    suggestionItem: 'Type a few letters into the entity field to open the list first.',
+    suggestionItem:
+      'Type a few letters into the entity field to open the list first. Alt+click one of the actual result rows below — NOT the search/filter box at the top, even if it looks like part of the list.',
     fileTarget:
       'Alt+click the visible "Upload data file" box — the hidden input that actually takes the file is found from there automatically.',
     uploadButton:
       'The "Upload and add" button. Bind it even though it normally opens a file-picker dialog — that dialog is intercepted and answered with the dropped file, so it won\'t appear.',
     sheetSelectField:
       'Only needed if your workbooks have multiple sheets. Upload one manually to make the picker appear, then Alt+click it. The sheet itself is chosen per file in the queue.',
-    sheetOption: 'Open that sheet picker, then Alt+click one sheet name in the list.',
+    sheetOption:
+      'Open that sheet picker, then Alt+click one sheet name in the result list — NOT the search/filter box at the top.',
     entitiesGridRow:
       'Add one file manually first so a row exists to click. Used to detect success — falls back to a fixed pause if left unbound.',
     closePanelButton:
@@ -196,26 +198,46 @@
     return modal;
   }
 
+  // Roles the automation clicks an item out of — as opposed to
+  // entitiesGridRow, which is only ever counted, never clicked, so a
+  // selector resolving to inputs is fine there but not here.
+  const CLICKABLE_LIST_ROLES = new Set(['sourceFormatOption', 'suggestionItem', 'sheetOption']);
+
   // Reports what a saved selector actually matches on the page right now.
-  // A selector matching nothing (stale) or matching dozens of elements
-  // (mis-picked onto something generic) is the usual cause of a run failing,
-  // and is otherwise invisible until it errors mid-import.
+  // A selector matching nothing (stale), matching dozens of elements
+  // (mis-picked onto something generic), or matching only form fields
+  // (mis-picked onto a filter box instead of an actual list row — the
+  // automation ignores those, same check as queryListCandidates) is the
+  // usual cause of a run failing, and is otherwise invisible until it
+  // errors mid-import.
   function describeMatches(selector, role) {
-    let count;
+    let rawCount;
     try {
-      count = document.querySelectorAll(selector).length;
+      rawCount = document.querySelectorAll(selector).length;
     } catch (e) {
       return { text: 'invalid selector', level: 'bad' };
     }
-    if (count === 0) return { text: '0 on page now', level: 'warn' };
-    if (D365IA.binder.LIST_ROLES.has(role)) {
-      return count > 25
-        ? { text: `${count} matches — too generic?`, level: 'bad' }
-        : { text: `${count} matches`, level: 'ok' };
+    if (rawCount === 0) return { text: '0 on page now', level: 'warn' };
+
+    if (CLICKABLE_LIST_ROLES.has(role)) {
+      const usable = D365IA.domUtils.queryListCandidates(selector).length;
+      if (usable === 0) {
+        return { text: `${rawCount} matches, but all form fields — pick a row, not a search box`, level: 'bad' };
+      }
+      return usable > 25
+        ? { text: `${usable} matches — too generic?`, level: 'bad' }
+        : { text: `${usable} matches`, level: 'ok' };
     }
-    return count === 1
+
+    if (D365IA.binder.LIST_ROLES.has(role)) {
+      return rawCount > 25
+        ? { text: `${rawCount} matches — too generic?`, level: 'bad' }
+        : { text: `${rawCount} matches`, level: 'ok' };
+    }
+
+    return rawCount === 1
       ? { text: '1 match', level: 'ok' }
-      : { text: `${count} matches — ambiguous`, level: 'warn' };
+      : { text: `${rawCount} matches — ambiguous`, level: 'warn' };
   }
 
   async function refreshValues() {

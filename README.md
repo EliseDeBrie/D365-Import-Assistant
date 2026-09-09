@@ -152,9 +152,17 @@ entity, so a bad guess surfaces before a long run rather than partway
 through. Comparison ignores case and spacing, because OData spells an entity
 `CustomerGroups` where the import form labels it `Customer groups`.
 
-This only warns. What gets typed into D365 is still what the queue shows —
-the OData spelling is deliberately not substituted in, since the import
-form's lookup wants the label form.
+What gets *typed* into D365 is still what the queue shows — the OData
+spelling is deliberately not substituted in, since the import form's lookup
+wants the label form. But it's more than a passive warning: when picking
+which live D365 suggestion to click, a validated real entity name is used as
+an extra signal alongside the typed guess, and picking the best-scoring of
+the two. And if no live suggestion list is available at all to confirm
+anything got properly selected (see "Notes on binding a list" below), a
+typed name the entity list doesn't recognize stops the file with an error
+instead of being silently accepted — a name can sit in the field, non-empty,
+without D365 having actually accepted it as a real selection, which otherwise
+only surfaces two steps later as a mysterious missing upload box.
 
 ## Cleaning rules
 

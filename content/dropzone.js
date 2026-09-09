@@ -140,7 +140,13 @@
       await queue.run(bindings, settings.options);
 
       if (queue.isPaused()) {
-        setStatus('Paused — an item needs your review below.', 'warn');
+        const stuck = queue.getItems().find((it) => it.status === 'needs-review' || it.status === 'error');
+        setStatus(
+          stuck && stuck.status === 'error'
+            ? 'Stopped — a file failed, see the red item below for why.'
+            : 'Paused — an item needs your review below.',
+          'warn'
+        );
         return;
       }
 
@@ -282,6 +288,32 @@
           });
 
           li.appendChild(select);
+          li.appendChild(skipBtn);
+        }
+
+        // An errored item just sits there otherwise — nothing in the UI
+        // says whether clicking Upload again does anything with it (it
+        // silently moves on to the next file; this one stays failed).
+        if (item.status === 'error') {
+          const retryBtn = document.createElement('button');
+          retryBtn.textContent = 'Retry';
+          retryBtn.addEventListener('click', async () => {
+            queue.updateItem(item.id, { status: 'pending', error: null });
+            const bindings = await getBindings();
+            const settings = await getSettings();
+            queue.run(bindings, settings.options);
+          });
+
+          const skipBtn = document.createElement('button');
+          skipBtn.textContent = 'Skip';
+          skipBtn.addEventListener('click', async () => {
+            queue.skip(item.id);
+            const bindings = await getBindings();
+            const settings = await getSettings();
+            queue.run(bindings, settings.options);
+          });
+
+          li.appendChild(retryBtn);
           li.appendChild(skipBtn);
         }
 
