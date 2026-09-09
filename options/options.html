@@ -52,7 +52,8 @@
       <p class="hint">
         If you bind "entities grid row", the extension waits for a new row to appear there
         (up to this timeout) before starting the next file. Otherwise it just pauses for the
-        "Pause between files" duration and assumes it's done.
+        "Pause between files" duration and assumes it's done. Defaults to 5 minutes because
+        D365 warns that Excel imports can queue waiting for the Excel driver.
       </p>
     </section>
 

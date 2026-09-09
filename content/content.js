@@ -12,7 +12,7 @@
           matchThreshold: 0.75,
           stepDelay: 700,
           elementTimeout: 5000,
-          uploadTimeout: 60000
+          uploadTimeout: 300000
         },
         stored.options || {}
       )

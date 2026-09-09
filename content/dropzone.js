@@ -120,6 +120,21 @@
         return;
       }
 
+      // A multi-sheet workbook makes D365 stop and ask which sheet to
+      // import. With nothing bound to answer that, every such file stalls
+      // until it times out, so say so now rather than after the first one.
+      const multiSheet = queue
+        .getItems()
+        .filter((it) => it.status === 'pending' && it.sheetNames && it.sheetNames.length > 1);
+      const sheetBound = bindings.sheetSelectField && bindings.sheetSelectField.selector;
+      if (multiSheet.length > 0 && !sheetBound) {
+        setStatus(
+          `${multiSheet.length} file(s) have multiple sheets, so D365 will ask which sheet to import and nothing can answer it. Bind "Sheet picker" in Setup fields first.`,
+          'warn'
+        );
+        return;
+      }
+
       const settings = await getSettings();
       setStatus('Running...');
       await queue.run(bindings, settings.options);

@@ -274,7 +274,7 @@
     }
 
     async function waitForGridRow(bindings, baselineCount, options) {
-      const timeout = (options && options.uploadTimeout) || 60000;
+      const timeout = (options && options.uploadTimeout) || 300000;
       try {
         await domUtils.waitFor(() => countGridRows(bindings) > baselineCount, {
           timeout,
@@ -284,7 +284,7 @@
         throw new Error(
           `The file was handed to D365 but no new row appeared in the entities grid within ${Math.round(
             timeout / 1000
-          )}s. Check whether the upload actually started, or clear the "entities grid row" binding to skip this check.`
+          )}s. If this workbook has several sheets, D365 is probably still waiting for a sheet to be picked — bind the sheet picker in Setup fields. Otherwise the upload may just be slow (D365 warns that Excel imports can queue for the Excel driver), so raise "Max wait for a file to finish uploading" in Settings.`
         );
       }
     }

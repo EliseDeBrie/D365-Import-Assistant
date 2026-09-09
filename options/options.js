@@ -12,7 +12,7 @@ async function load() {
   const settings = data.settings || {};
   const rules = Object.assign({}, window.D365IA.matcher.DEFAULT_RULES, settings.rules || {});
   const options = Object.assign(
-    { matchThreshold: 0.75, stepDelay: 700, elementTimeout: 5000, uploadTimeout: 60000 },
+    { matchThreshold: 0.75, stepDelay: 700, elementTimeout: 5000, uploadTimeout: 300000 },
     settings.options || {}
   );
 
@@ -67,7 +67,7 @@ document.getElementById('save').addEventListener('click', async () => {
     matchThreshold: parseFloat(document.getElementById('matchThreshold').value) || 0.75,
     stepDelay: parseInt(document.getElementById('stepDelay').value, 10) || 700,
     elementTimeout: parseInt(document.getElementById('elementTimeout').value, 10) || 5000,
-    uploadTimeout: parseInt(document.getElementById('uploadTimeout').value, 10) || 60000
+    uploadTimeout: parseInt(document.getElementById('uploadTimeout').value, 10) || 300000
   };
 
   await chrome.storage.sync.set({ settings: { rules: currentRules(), options } });
