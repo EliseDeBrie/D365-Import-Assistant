@@ -142,13 +142,18 @@
     // otherwise it opens the control and clicks the best-matching option if
     // an option selector is bound, and falls back to typing the value into
     // the combo box (D365 combos resolve what you type) when it isn't.
+    // Reports whether a real option got clicked (viaOption) — some D365
+    // lookups require a genuine selection and leave typed-only text sitting
+    // in the field as unaccepted, which callers with reliable ground truth
+    // (e.g. sheet names, read directly from the file) should treat as a
+    // real failure rather than silent success.
     async function pickFromDropdown(fieldEl, optionSelector, desiredText, options) {
       const selectEl = domUtils.resolveSelect(fieldEl);
       if (selectEl) {
         if (!domUtils.selectNativeOption(selectEl, desiredText)) {
           throw new Error(`No option matching "${desiredText}" in the dropdown.`);
         }
-        return desiredText;
+        return { value: desiredText, viaOption: true };
       }
 
       domUtils.clickElement(fieldEl);
@@ -164,7 +169,7 @@
           if (candidate && score >= 0.5) {
             const chosenEl = optionEls.find((el) => el.textContent.trim() === candidate);
             domUtils.clickElement(chosenEl);
-            return candidate;
+            return { value: candidate, viaOption: true };
           }
         } catch (e) {
           // Fall through to typing the value instead.
@@ -173,7 +178,7 @@
 
       domUtils.typeIntoField(fieldEl, desiredText);
       domUtils.commitField(fieldEl);
-      return desiredText;
+      return { value: desiredText, viaOption: false };
     }
 
     function selectSuggestion(suggestionSelector, candidateText) {
@@ -230,8 +235,18 @@
     }
 
     // A workbook with more than one sheet makes D365 ask which one to
-    // import. Best-effort: if the sheet control is bound and shows up, set
-    // it to the sheet chosen in the panel; otherwise leave it to the user.
+    // import. If the sheet control is bound and shows up, set it to the
+    // sheet chosen in the panel; otherwise leave it to the user.
+    //
+    // Unlike the entity name (D365's technical name vs. display label can
+    // legitimately differ), sheet names are read directly out of this same
+    // file, so they're reliable ground truth — D365's own dropdown must
+    // offer that exact text. So a fallback that only typed the value in,
+    // without a real option getting clicked, is treated as a real failure
+    // here rather than best-effort: D365's sheet lookup requires a genuine
+    // selection and otherwise leaves typed text sitting there unaccepted
+    // ("Excel sheet lookup value is mandatory"), which would only surface
+    // minutes later as a grid-row timeout with no link back to the cause.
     async function applySheetSelection(bindings, item, options) {
       if (!item.selectedSheet) return;
       const binding = bindings.sheetSelectField;
@@ -245,8 +260,15 @@
       if (!sheetEl) return;
 
       if (domUtils.fieldText(sheetEl).toLowerCase() === item.selectedSheet.toLowerCase()) return;
+
       const optionSelector = bindings.sheetOption && bindings.sheetOption.selector;
-      await pickFromDropdown(sheetEl, optionSelector, item.selectedSheet, options);
+      const result = await pickFromDropdown(sheetEl, optionSelector, item.selectedSheet, options);
+
+      if (!result.viaOption) {
+        throw new Error(
+          `Typed "${item.selectedSheet}" into the sheet picker, but couldn't click a real option for it — D365's sheet lookup needs a genuine selection, not just typed text, or it stays "mandatory"/unfilled. Bind "one item in that sheet picker's open list" to an actual sheet-name row (open the picker first, then Alt+click a row — not the search/filter box).`
+        );
+      }
     }
 
     // D365 re-renders the Add file panel after an upload and clears the
@@ -466,6 +488,7 @@
         const baselineCount = countGridRows(bindings);
         updateItem(id, { status: 'uploading', matchedEntity: chosenSuggestionText });
         await attachFile(bindings, item, options || {});
+        await applySheetSelection(bindings, item, options || {});
 
         if (baselineCount !== null) {
           await waitForGridRow(bindings, baselineCount, options);
