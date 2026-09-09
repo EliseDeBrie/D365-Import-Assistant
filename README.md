@@ -56,8 +56,8 @@ from the cleaned-up file name, then attaches the file — no typing per file.
      confirms the field actually kept the value,
    - attaches the Excel file — the upload box only renders once a valid
      entity is selected,
-   - waits for a new row to appear in the entities grid (if that's bound),
-     then for the panel to reset, before moving to the next file.
+   - waits for D365 to confirm the file landed (see *How the extension knows
+     a file landed* below), then for the panel to reset, before moving on.
 5. If no suggestion is a confident match, that file is marked
    **needs-review** — pick the right entity from a dropdown (built from
    D365's own suggestions) or skip it. Nothing is ever typed in blind without
@@ -91,6 +91,27 @@ than something misleading about a missing field.
 
 To teach it another prompt, add an entry to `KNOWN_PROMPTS` in
 `content/queue.js` — a regex for the text and the button label to press.
+
+### How the extension knows a file landed
+
+Whichever of these arrives first, per file:
+
+1. **D365's `/fileUpload` response** — the POST returning 2xx, seen by
+   `page-hook.js` in whichever frame made the request.
+2. **D365's own message bar** — *"'Customer Groups' entity mapping has
+   completed successfully"*.
+3. **The Add file panel clearing itself**, which D365 only does once it has
+   taken the file — counted only for a file that actually put a value in the
+   entity field, since an empty panel is also how it starts out. Some D365
+   versions rebuild it blank, others tear it down; both count.
+4. **A new row in the entities grid**, if `entitiesGridRow` is bound.
+
+It used to wait on (4) alone. That needs an optional binding, and D365 renders
+that grid through React with virtualised rows, so the count often doesn't move
+even when the upload plainly succeeded — leaving a batch parked at `[UPLOAD]`
+for the full five-minute timeout per file while the message bar on screen
+already said the file was in. Each row now shows which signal confirmed it,
+so a stall is diagnosable rather than mysterious.
 
 ### Why a batch can't stall part-way
 

@@ -414,3 +414,80 @@ test('leaves an unrecognised dialog alone and reports it', async () => {
     `the failure should name the dialog blocking it, got: ${item.error}`
   );
 });
+
+// The reported stall: two files in, the queue sat at [UPLOAD] while D365's
+// own message bar already read "'Customer Groups' entity mapping has
+// completed successfully". The upload step waited on one signal only -- a new
+// row in the entities grid -- which needs an optional binding and doesn't
+// move reliably, because D365 renders that grid through React with
+// virtualised rows.
+async function bindingsWithStaleGrid(page) {
+  // A bound selector that matches nothing: the row count starts at zero and
+  // never grows, exactly like a stale or virtualised grid binding.
+  return Object.assign({}, await bindings(page), {
+    entitiesGridRow: { selector: '.entities-grid-row-that-never-appears' }
+  });
+}
+
+test('a stale entities-grid binding no longer stalls the batch', async () => {
+  const { page, d365, queue } = setup({
+    entities: ['Sites V2', 'Vendors V2', 'Customers V3']
+  });
+  queue.addFiles(
+    [
+      file(page, '01_Sites_V2.xlsx'),
+      file(page, '02_Vendors_V2.xlsx'),
+      file(page, '03_Customers_V3.xlsx')
+    ],
+    {}
+  );
+
+  const result = await queue.run(await bindingsWithStaleGrid(page), FAST);
+
+  equal(result.uploaded, 3, `run summary was ${JSON.stringify(result)}`);
+  equal(d365.uploads().length, 3);
+});
+
+test("takes D365's success message as confirmation the file landed", async () => {
+  const { page, queue } = setup({ entities: ['Vendors V2'] });
+  queue.addFiles([file(page, '01_Vendors_V2.xlsx')], {});
+
+  const result = await queue.run(await bindingsWithStaleGrid(page), FAST);
+
+  equal(result.uploaded, 1, `run summary was ${JSON.stringify(result)}`);
+  equal(queue.getItems()[0].confirmedBy, 'message');
+});
+
+// With no success message and no usable grid, the panel clearing itself is
+// still proof D365 took the file.
+test('takes the panel clearing as confirmation when nothing else says so', async () => {
+  const { page, queue } = setup({
+    entities: ['Vendors V2'],
+    announceSuccess: false,
+    resetPanelAfterUpload: true
+  });
+  queue.addFiles([file(page, '01_Vendors_V2.xlsx')], {});
+
+  const result = await queue.run(await bindingsWithStaleGrid(page), FAST);
+
+  equal(result.uploaded, 1, `run summary was ${JSON.stringify(result)}`);
+  equal(queue.getItems()[0].confirmedBy, 'panel-reset');
+});
+
+// And when D365 confirms nothing at all, the step has to say so rather than
+// reporting a missing grid row as though that were the whole story.
+test('reports a genuinely unconfirmed upload', async () => {
+  const { page, queue } = setup({ entities: ['Vendors V2'], announceSuccess: false });
+  queue.addFiles([file(page, '01_Vendors_V2.xlsx')], {});
+
+  const impatient = Object.assign({}, FAST, { uploadTimeout: 600 });
+  const result = await queue.run(await bindingsWithStaleGrid(page), impatient);
+
+  equal(result.uploaded, 0);
+  const item = queue.getItems()[0];
+  equal(item.step, 'upload');
+  assert(
+    item.error.includes('never confirmed the upload'),
+    `unhelpful failure text: ${item.error}`
+  );
+});

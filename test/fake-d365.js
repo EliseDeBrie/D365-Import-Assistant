@@ -23,7 +23,14 @@ function install(window, options = {}) {
     // Sheet names already mapped in this import project, and the prompts
     // raised as a result.
     mappedSheets: new Set(),
-    prompts: []
+    prompts: [],
+    // D365 announces each landed file in its message bar. Turning this off
+    // models an environment where that message doesn't appear, so the queue
+    // has to fall back to another confirmation.
+    announceSuccess: options.announceSuccess !== false,
+    // D365 rebuilds the Add file panel after each upload. Off by default so
+    // most tests exercise the reuse path; on, it exercises the rebuild.
+    resetPanelAfterUpload: options.resetPanelAfterUpload === true
   };
 
   document.body.innerHTML = `
@@ -219,7 +226,18 @@ function install(window, options = {}) {
           entity: entityLookup ? entityLookup.getCommitted() : null,
           sheet: () => (sheetLookup ? sheetLookup.getCommitted() : null)
         });
-        message(`Uploaded ${file.name}.`);
+        // D365's actual wording when a file lands, which is the signal the
+        // queue reads to know the upload finished.
+        const entity = entityLookup ? entityLookup.getCommitted() : file.name;
+        if (state.announceSuccess) {
+          message(`'${entity}' entity mapping has completed successfully`);
+        }
+        // D365 clears the Add file panel once it has taken the file, so the
+        // next file starts from a blank form. It does this *after* showing the
+        // file name, not instead of -- clearing synchronously here would wipe
+        // the name before anything could observe it, which the real form
+        // never does.
+        if (state.resetPanelAfterUpload) window.setTimeout(clearPanel, 400);
       }
 
       // Two workbooks in one project using the same sheet name -- every file

@@ -337,7 +337,12 @@
       // The step name is what makes a failure actionable ("attach-file"
       // versus "entity-name" are entirely different problems).
       const where = item.step ? ` [${item.step}]` : '';
-      statusDiv.textContent = item.status + where + (item.error ? ': ' + item.error : '');
+      // Which signal proved the upload landed. Worth showing: when a batch
+      // stalls, knowing whether D365 confirmed by message, grid row or panel
+      // reset is the difference between a guess and a diagnosis.
+      const how = item.status === 'filled' && item.confirmedBy ? ` (${item.confirmedBy})` : '';
+      statusDiv.textContent =
+        item.status + where + how + (item.error ? ': ' + item.error : '');
       li.appendChild(statusDiv);
     }
 

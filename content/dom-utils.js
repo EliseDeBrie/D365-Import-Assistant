@@ -289,10 +289,20 @@
     fireEvent(fileInputEl, 'change');
   }
 
+  // Polls until checkFn returns something truthy.
+  //
+  // The first check is immediate. On a plain setInterval the condition is
+  // never tested until a full interval has passed, which costs every wait
+  // 100ms it didn't need across a long batch -- and, worse, misses a
+  // condition that is true right now but gone again before the first tick.
+  // The file name D365 shows in the upload box is exactly that: it appears,
+  // then the panel is rebuilt out from under it.
   function waitFor(checkFn, { timeout = 4000, interval = 100 } = {}) {
     return new Promise((resolve, reject) => {
       const start = Date.now();
-      const timer = setInterval(() => {
+      let timer = null;
+
+      function attempt() {
         let result;
         try {
           result = checkFn();
@@ -300,13 +310,20 @@
           result = null;
         }
         if (result) {
-          clearInterval(timer);
+          if (timer) clearInterval(timer);
           resolve(result);
-        } else if (Date.now() - start > timeout) {
-          clearInterval(timer);
-          reject(new Error('Timed out waiting for condition'));
+          return true;
         }
-      }, interval);
+        if (Date.now() - start > timeout) {
+          if (timer) clearInterval(timer);
+          reject(new Error('Timed out waiting for condition'));
+          return true;
+        }
+        return false;
+      }
+
+      if (attempt()) return;
+      timer = setInterval(attempt, interval);
     });
   }
 

@@ -393,6 +393,9 @@
       }
 
       ctx.update({ matchedEntity: shown });
+      // Remembered so the upload step can trust a now-empty entity field as
+      // proof the panel was rebuilt, rather than as the state it starts in.
+      ctx.entityWasSet = true;
     }
 
     async function attachFile(ctx) {
@@ -411,6 +414,9 @@
 
       const ownerDocument = fileTargetEl.ownerDocument || document;
       const before = domUtils.readMessages();
+      // The upload step needs this snapshot to tell D365's success message for
+      // THIS file from one left over from the previous one.
+      ctx.messagesBeforeAttach = before;
       domUtils.armFileHook(ctx.item.file, ownerDocument);
 
       // D365 POSTs the file to /fileUpload; page-hook.js reports when that
@@ -529,27 +535,82 @@
       }
     }
 
+    // What D365 says when a file has landed. Its own words are a far better
+    // completion signal than anything inferred from the DOM.
+    const UPLOAD_SUCCESS_RE =
+      /(mapping (has )?completed successfully|uploaded successfully|added successfully|has been (uploaded|added))/i;
+
+    // Waits for the file to actually land, accepting whichever confirmation
+    // arrives first.
+    //
+    // This used to wait on ONE signal: a new row in the entities grid. That
+    // needs an optional binding, and D365 renders the grid through React with
+    // virtualised rows, so the count often doesn't move even though the upload
+    // succeeded. The result was a batch sitting at [UPLOAD] for the full
+    // five-minute timeout per file while the message bar right there on screen
+    // already read "'Customer Groups' entity mapping has completed
+    // successfully". Any one of these is proof enough.
     async function waitForUpload(ctx) {
       const timeout = ctx.options.uploadTimeout || 300000;
-      if (ctx.baselineGridRows === null) {
+      const before = ctx.messagesBeforeAttach || [];
+
+      // D365 answered the upload POST with a 2xx. Nothing left to confirm.
+      if (ctx.uploadConfirmed) {
         await sleep(ctx.options.stepDelay || 700);
         return;
       }
 
-      try {
-        await domUtils.waitFor(() => countGridRows(ctx.bindings) > ctx.baselineGridRows, {
-          timeout,
-          interval: 500
-        });
-      } catch (e) {
+      const entityBinding = ctx.bindings.entityNameField;
+      // Only meaningful once this file actually put a value in that field:
+      // an empty entity field is also how the panel starts out.
+      const canWatchPanel =
+        ctx.entityWasSet && ctx.item.sourceFormat !== 'Package' && !!(entityBinding && entityBinding.selector);
+
+      // With no signal available at all, fall back to the old fixed pause
+      // rather than burning the timeout waiting for something unobservable.
+      if (ctx.baselineGridRows === null && !canWatchPanel) {
+        await sleep(ctx.options.stepDelay || 700);
+        return;
+      }
+
+      const confirmedBy = await domUtils
+        .waitFor(
+          () => {
+            // a) D365 announced it.
+            const since = domUtils.newMessagesSince(before);
+            if (since.some((text) => UPLOAD_SUCCESS_RE.test(text))) return 'message';
+
+            // b) A new row in the entities grid, when that binding exists.
+            if (ctx.baselineGridRows !== null && countGridRows(ctx.bindings) > ctx.baselineGridRows) {
+              return 'grid';
+            }
+
+            // c) D365 cleared the Add file panel, which it only does once it
+            //    has taken the file. Some versions rebuild the panel with the
+            //    field blank, others tear it down entirely -- both mean the
+            //    value this file put there is gone.
+            if (canWatchPanel) {
+              const nameEl = domUtils.queryVisible(entityBinding.selector);
+              if (!nameEl || !domUtils.fieldText(nameEl)) return 'panel-reset';
+            }
+
+            return null;
+          },
+          { timeout, interval: 500 }
+        )
+        .catch(() => null);
+
+      if (!confirmedBy) {
         throw stepError(
           'upload',
-          `no new row appeared in the entities grid within ${Math.round(
+          `D365 never confirmed the upload within ${Math.round(
             timeout / 1000
-          )}s. D365 warns Excel imports can queue for the Excel driver, so this may just need a longer wait in Settings.`,
+          )}s — no success message, no new entities-grid row, and the Add file panel never cleared. D365 warns Excel imports can queue for the Excel driver, so this may just need a longer wait in Settings.`,
           withDialogContext(domUtils.readMessages())
         );
       }
+
+      ctx.update({ confirmedBy });
     }
 
     async function waitForPanelReset(ctx) {
@@ -786,7 +847,7 @@
     }
 
     function retry(id) {
-      updateItem(id, { status: 'pending', error: null, step: null });
+      updateItem(id, { status: 'pending', error: null, step: null, confirmedBy: null });
     }
 
     function skip(id) {
