@@ -1,9 +1,23 @@
 (function () {
   const D365IA = (window.D365IA = window.D365IA || {});
+  const { domUtils, matcher } = D365IA;
 
-  // Drives the batch: for each dropped file, type the cleaned name into the
-  // bound entity field, wait for D365's own autocomplete suggestions, pick
-  // the best match (or pause for the user to pick one), then attach the file.
+  const CSV_EXTENSION_RE = /\.csv$/i;
+
+  function sourceFormatFor(fileName) {
+    return CSV_EXTENSION_RE.test(fileName) ? 'CSV' : 'Excel';
+  }
+
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  // Drives the batch through D365's real per-file sequence: Add file ->
+  // Source data format -> Entity name (autocomplete) -> attach file ->
+  // Upload -> wait for a new row in the entities grid. For each file, the
+  // entity name is matched against D365's own suggestion list rather than
+  // typed in blind, and the queue pauses for you to pick manually whenever
+  // that match is ambiguous.
   function createQueue({ onStatusChange }) {
     let items = [];
     let running = false;
@@ -18,8 +32,10 @@
         id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         file,
         rawName: file.name,
-        cleanedName: D365IA.matcher.cleanFileName(file.name, rules),
-        status: 'pending', // pending | matching | needs-review | matched | filled | error | skipped
+        cleanedName: matcher.cleanFileName(file.name, rules),
+        sourceFormat: sourceFormatFor(file.name),
+        // pending | matching | needs-review | uploading | filled | error | skipped
+        status: 'pending',
         matchedEntity: null,
         suggestions: [],
         error: null
@@ -49,59 +65,137 @@
       emit();
     }
 
+    function requireBoundEl(bindings, role) {
+      const binding = bindings[role];
+      if (!binding || !binding.selector) {
+        throw new Error(`"${role}" isn't bound yet — open Setup fields.`);
+      }
+      const el = document.querySelector(binding.selector);
+      if (!el) {
+        throw new Error(`Bound element for "${role}" isn't on the page right now.`);
+      }
+      return el;
+    }
+
+    // Opens a dropdown/select control and picks the option whose text best
+    // matches desiredText. Used for the Source data format field, but not
+    // tied to it specifically.
+    async function pickFromDropdown(fieldEl, optionSelector, desiredText, options) {
+      if (domUtils.isNativeSelect(fieldEl)) {
+        if (!domUtils.selectNativeOption(fieldEl, desiredText)) {
+          throw new Error(`No option matching "${desiredText}" in the dropdown.`);
+        }
+        return desiredText;
+      }
+
+      domUtils.clickElement(fieldEl);
+      await domUtils.waitFor(() => document.querySelectorAll(optionSelector).length > 0, {
+        timeout: options.suggestionTimeout || 2500
+      });
+      const optionEls = Array.from(document.querySelectorAll(optionSelector));
+      const texts = optionEls.map((el) => el.textContent.trim());
+      const { candidate, score } = matcher.bestMatch(desiredText, texts);
+      if (!candidate || score < 0.5) {
+        throw new Error(`Couldn't find a "${desiredText}" option in the dropdown.`);
+      }
+      const chosenEl = optionEls.find((el) => el.textContent.trim() === candidate);
+      domUtils.clickElement(chosenEl);
+      return candidate;
+    }
+
+    function selectSuggestion(suggestionSelector, candidateText) {
+      const els = Array.from(document.querySelectorAll(suggestionSelector));
+      const el = els.find((e) => e.textContent.trim() === candidateText);
+      if (!el) return false;
+      domUtils.clickElement(el);
+      return true;
+    }
+
+    function attachFile(fileTargetEl, file) {
+      if (fileTargetEl.tagName === 'INPUT' && fileTargetEl.type === 'file') {
+        domUtils.dropFileOnInput(fileTargetEl, file);
+      } else {
+        domUtils.dropFileOnDropTarget(fileTargetEl, file);
+      }
+    }
+
+    function countGridRows(bindings) {
+      const binding = bindings.entitiesGridRow;
+      if (!binding || !binding.selector) return null;
+      return document.querySelectorAll(binding.selector).length;
+    }
+
+    // Fills in the Entity name field and resolves it against D365's own
+    // autocomplete. Returns { needsReview: true } if the match isn't
+    // confident enough to proceed unattended.
+    async function matchEntityName(id, item, bindings, options) {
+      const entityFieldEl = requireBoundEl(bindings, 'entityNameField');
+      domUtils.typeIntoField(entityFieldEl, item.cleanedName);
+
+      const suggestionSelector = bindings.suggestionItem && bindings.suggestionItem.selector;
+      let suggestions = [];
+      if (suggestionSelector) {
+        try {
+          await domUtils.waitFor(() => document.querySelectorAll(suggestionSelector).length > 0, {
+            timeout: options.suggestionTimeout || 2500
+          });
+          suggestions = Array.from(document.querySelectorAll(suggestionSelector)).map((el) =>
+            el.textContent.trim()
+          );
+        } catch (e) {
+          suggestions = [];
+        }
+      }
+
+      if (suggestions.length === 0) return { needsReview: false };
+
+      const { candidate, score } = matcher.bestMatch(item.cleanedName, suggestions);
+      if (score >= (options.matchThreshold || 0.75) && selectSuggestion(suggestionSelector, candidate)) {
+        updateItem(id, { matchedEntity: candidate });
+        return { needsReview: false };
+      }
+
+      updateItem(id, { status: 'needs-review', suggestions });
+      paused = true;
+      return { needsReview: true };
+    }
+
+    // Runs one file through the full Add file -> Source format -> Entity
+    // name -> File -> Upload sequence, then waits for the entities grid to
+    // confirm success (or falls back to a fixed delay if that row isn't
+    // bound). Stops and flags for review if the entity match is ambiguous;
+    // stops and flags an error if anything else goes wrong.
     async function processItem(id, bindings, options) {
       const item = items.find((it) => it.id === id);
       if (!item) return null;
       updateItem(id, { status: 'matching' });
 
       try {
-        const entityFieldEl = document.querySelector(bindings.entityNameField.selector);
-        const fileTargetEl = document.querySelector(bindings.fileTarget.selector);
-        if (!entityFieldEl || !fileTargetEl) {
-          throw new Error('Bound fields not found on this page — re-check Setup fields.');
+        const baselineCount = countGridRows(bindings);
+
+        domUtils.clickElement(requireBoundEl(bindings, 'addFileButton'));
+
+        const formatFieldEl = requireBoundEl(bindings, 'sourceFormatField');
+        const formatOptionSelector = bindings.sourceFormatOption && bindings.sourceFormatOption.selector;
+        if (formatOptionSelector || domUtils.isNativeSelect(formatFieldEl)) {
+          await pickFromDropdown(formatFieldEl, formatOptionSelector, item.sourceFormat, options);
         }
 
-        D365IA.domUtils.typeIntoField(entityFieldEl, item.cleanedName);
+        const matchResult = await matchEntityName(id, item, bindings, options);
+        if (matchResult.needsReview) return { needsReview: true };
 
-        const suggestionSelector = bindings.suggestionItem && bindings.suggestionItem.selector;
-        let suggestions = [];
-        if (suggestionSelector) {
-          try {
-            await D365IA.domUtils.waitFor(
-              () => document.querySelectorAll(suggestionSelector).length > 0,
-              { timeout: options.suggestionTimeout || 2500 }
-            );
-            suggestions = Array.from(document.querySelectorAll(suggestionSelector)).map((el) =>
-              el.textContent.trim()
-            );
-          } catch (e) {
-            suggestions = [];
-          }
-        }
+        attachFile(requireBoundEl(bindings, 'fileTarget'), item.file);
 
-        if (suggestions.length > 0) {
-          const { candidate, score } = D365IA.matcher.bestMatch(item.cleanedName, suggestions);
-          if (score >= (options.matchThreshold || 0.75)) {
-            const picked = selectSuggestion(suggestionSelector, candidate);
-            if (picked) {
-              updateItem(id, { matchedEntity: candidate });
-            } else {
-              updateItem(id, { status: 'needs-review', suggestions });
-              paused = true;
-              return { needsReview: true };
-            }
-          } else {
-            updateItem(id, { status: 'needs-review', suggestions });
-            paused = true;
-            return { needsReview: true };
-          }
-        }
+        updateItem(id, { status: 'uploading' });
+        domUtils.clickElement(requireBoundEl(bindings, 'uploadButton'));
 
-        attachFile(fileTargetEl, item.file);
-
-        if (bindings.addRowButton && bindings.addRowButton.selector && options.autoAddRow) {
-          const addBtn = document.querySelector(bindings.addRowButton.selector);
-          if (addBtn) addBtn.click();
+        if (baselineCount !== null) {
+          await domUtils.waitFor(() => countGridRows(bindings) > baselineCount, {
+            timeout: options.uploadTimeout || 60000,
+            interval: 500
+          });
+        } else {
+          await sleep(options.stepDelay || 700);
         }
 
         updateItem(id, { status: 'filled' });
@@ -113,35 +207,28 @@
       }
     }
 
-    function selectSuggestion(suggestionSelector, candidateText) {
-      const els = Array.from(document.querySelectorAll(suggestionSelector));
-      const el = els.find((e) => e.textContent.trim() === candidateText);
-      if (!el) return false;
-      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      return true;
-    }
-
-    function attachFile(fileTargetEl, file) {
-      if (fileTargetEl.tagName === 'INPUT' && fileTargetEl.type === 'file') {
-        D365IA.domUtils.dropFileOnInput(fileTargetEl, file);
-      } else {
-        D365IA.domUtils.dropFileOnDropTarget(fileTargetEl, file);
-      }
-    }
-
     async function run(bindings, options) {
       if (running) return;
       running = true;
       paused = false;
+      let completedAll = false;
       while (!paused) {
         const next = items.find((it) => it.status === 'pending');
-        if (!next) break;
+        if (!next) {
+          completedAll = true;
+          break;
+        }
         const result = await processItem(next.id, bindings, options || {});
         if (!result) break;
-        await new Promise((r) => setTimeout(r, (options && options.stepDelay) || 700));
+        await sleep((options && options.stepDelay) || 700);
       }
       running = false;
+
+      if (completedAll && options && options.autoRunImport && bindings.runImportButton && bindings.runImportButton.selector) {
+        const runBtn = document.querySelector(bindings.runImportButton.selector);
+        if (runBtn) domUtils.clickElement(runBtn);
+      }
+
       emit();
     }
 
@@ -150,21 +237,36 @@
     }
 
     // Called from the UI once the user manually picks a suggestion for an
-    // item stuck at "needs-review"; resumes the run afterwards.
-    function resumeAfterReview(id, chosenSuggestionText, bindings, options) {
+    // item stuck at "needs-review"; finishes that file's remaining steps
+    // (file attach, upload, wait for grid) and resumes the run afterwards.
+    async function resumeAfterReview(id, chosenSuggestionText, bindings, options) {
       const item = items.find((it) => it.id === id);
       if (!item) return;
-      const suggestionSelector = bindings.suggestionItem && bindings.suggestionItem.selector;
-      if (suggestionSelector) {
-        selectSuggestion(suggestionSelector, chosenSuggestionText);
+
+      try {
+        const suggestionSelector = bindings.suggestionItem && bindings.suggestionItem.selector;
+        if (suggestionSelector) selectSuggestion(suggestionSelector, chosenSuggestionText);
+
+        const baselineCount = countGridRows(bindings);
+        attachFile(requireBoundEl(bindings, 'fileTarget'), item.file);
+        updateItem(id, { status: 'uploading', matchedEntity: chosenSuggestionText });
+        domUtils.clickElement(requireBoundEl(bindings, 'uploadButton'));
+
+        if (baselineCount !== null) {
+          await domUtils.waitFor(() => countGridRows(bindings) > baselineCount, {
+            timeout: (options && options.uploadTimeout) || 60000,
+            interval: 500
+          });
+        } else {
+          await sleep((options && options.stepDelay) || 700);
+        }
+
+        updateItem(id, { status: 'filled' });
+      } catch (err) {
+        updateItem(id, { status: 'error', error: err.message });
+        return;
       }
-      const fileTargetEl = document.querySelector(bindings.fileTarget.selector);
-      if (fileTargetEl) attachFile(fileTargetEl, item.file);
-      if (bindings.addRowButton && bindings.addRowButton.selector && options && options.autoAddRow) {
-        const addBtn = document.querySelector(bindings.addRowButton.selector);
-        if (addBtn) addBtn.click();
-      }
-      updateItem(id, { status: 'filled', matchedEntity: chosenSuggestionText });
+
       paused = false;
       run(bindings, options);
     }

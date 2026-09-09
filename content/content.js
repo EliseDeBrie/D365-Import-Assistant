@@ -8,7 +8,13 @@
     return {
       rules: Object.assign({}, defaults, stored.rules || {}),
       options: Object.assign(
-        { matchThreshold: 0.75, stepDelay: 700, suggestionTimeout: 2500, autoAddRow: true },
+        {
+          matchThreshold: 0.75,
+          stepDelay: 700,
+          suggestionTimeout: 2500,
+          uploadTimeout: 60000,
+          autoRunImport: false
+        },
         stored.options || {}
       )
     };

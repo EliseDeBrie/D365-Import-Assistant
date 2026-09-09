@@ -15,27 +15,35 @@ from the cleaned-up file name, then attaches the file — no typing per file.
    browse instead.
 3. For each file, the file name is cleaned up (leading/trailing sequence
    numbers, dates/timestamps, and `_`/`-` separators are stripped — see
-   *Cleaning rules* below) to produce a guessed entity name.
-4. Click **Start**. For each queued file, the extension:
-   - types the cleaned name into D365's own Entity name field,
-   - waits for D365's real autocomplete suggestions to appear,
-   - picks the best-scoring suggestion (exact/near match) and selects it,
-   - attaches the Excel file to that row,
-   - optionally clicks "Add row" and moves to the next file.
+   *Cleaning rules* below) to produce a guessed entity name, and the source
+   format is picked from the extension (`.csv` → CSV, otherwise → Excel).
+4. Click **Start**. For each queued file, the extension replays D365's own
+   click sequence:
+   - clicks **Add file**,
+   - opens the **Source data format** dropdown and picks Excel/CSV,
+   - types the cleaned name into the **Entity name** field once it appears,
+   - waits for D365's real autocomplete suggestions and picks the
+     best-scoring one,
+   - attaches the Excel file,
+   - clicks **Upload**, then waits for a new row to appear in the entities
+     grid (if that's bound) before moving to the next file.
 5. If no suggestion is a confident match, that file is marked
    **needs-review** and the queue pauses — pick the right entity from a
    dropdown (built from D365's own suggestions) or skip the file. Nothing is
    ever typed in blind without going through D365's real autocomplete, so a
    bad guess can't silently attach the wrong entity.
 
-The extension never auto-clicks D365's final **Import**/submit button —
-you always review the filled-in rows and trigger the actual import yourself.
+The per-row **Upload** is automated (it's just staging that one file), but the
+extension never auto-clicks the page-level **Import/Run** button that actually
+loads everything into D365 — that stays a manual, deliberate step unless you
+explicitly turn on auto-run in Settings.
 
 ## One-time setup: bind fields
 
 D365's DOM differs by version, environment and customization, so instead of
 hardcoding CSS selectors that could silently break, the extension asks you to
-point at the real elements once:
+point at the real elements once. The setup list is in the same order as the
+real click sequence:
 
 1. Open the Data management → Import screen you use.
 2. Click **Import Assist → Setup fields**.
@@ -44,18 +52,47 @@ point at the real elements once:
    dropdowns, whatever it takes to reveal the actual element you want. When
    the right element is visible, hold **Alt** and click it to bind it (a
    plain click does nothing to the picker — it only reaches the page). Press
-   **Esc** any time to cancel.
-   - **Entity name field** — the box you type the entity into. Alt+click it
-     directly.
-   - **Suggestion row** — type something into the entity field first so
-     D365's own autocomplete dropdown opens, *then* Alt+click one suggestion
-     row in that dropdown.
-   - **File target** — the file input or drop target for that grid row.
-   - **Add row button** *(optional)* — the button that adds a new import line.
-   - **Import/Submit button** *(optional)* — only needed if you turn on
-     auto-submit later; not auto-clicked otherwise.
+   **Esc** to cancel a bind in progress, or close the dialog with the **×**,
+   **Done**, or by clicking outside it.
+   - **Add file button** — click it once yourself first so a row exists,
+     then Alt+click the button itself.
+   - **Source data format dropdown** — Alt+click the dropdown control on that
+     row (before opening it).
+   - **Source data format option** — click the dropdown open, then Alt+click
+     one option (e.g. "Excel") in the list. This needs to match *any* option
+     in that list, not just the one you clicked — if picking a different file
+     later lands on the wrong option, rebind on an option in a different
+     position and see the **Notes on binding a list** section below.
+   - **Entity name field** — pick a format first so the field appears, then
+     Alt+click it directly.
+   - **Suggestion row** — type a few letters into the entity field so D365's
+     autocomplete opens, *then* Alt+click one suggestion row in that list.
+   - **File target** — the file input or drop target for that row.
+   - **Upload button** — the row's Upload button.
+   - **Entities grid row** *(optional but recommended)* — add one file
+     manually first so a row exists in the grid of already-uploaded
+     entities, then Alt+click that row. This is how the extension knows a
+     file finished uploading; without it, it just waits a fixed pause
+     (configurable in Settings) and assumes success.
+   - **Import/Run button** *(optional)* — the page-level button that actually
+     runs the import job. Only clicked if you turn on auto-run in Settings;
+     otherwise it's never touched.
 4. Bindings are saved (`chrome.storage.sync`) and reused automatically next
    time — you shouldn't need to redo this unless D365 changes its layout.
+
+### Notes on binding a list (suggestion row / dropdown option / grid row)
+
+These three roles all need to match *every* item in a repeating list, not
+just the one you clicked — otherwise the extension could only ever pick the
+first suggestion, or the first dropdown option, no matter what it should
+actually be. The picker handles this by generalizing the clicked element's
+own CSS class to match its siblings, rather than pinning to its position.
+That works well as long as list items share a class D365 doesn't reuse
+elsewhere on the page. If matching seems to only ever land on the item you
+originally bound, rebind by Alt+clicking a *different* item in that same
+list — if it still gets the same result, the class is being shared with
+something unrelated on the page and the selector needs a manual edit
+(current selectors are visible in Options → Field bindings).
 
 ## Cleaning rules
 
@@ -92,13 +129,18 @@ manifest.json          Manifest V3 config
 background.js          Sets default settings on install
 content/
   dom-utils.js          Low-level DOM helpers (native value setting, file
-                         attachment via DataTransfer, drag/drop replay)
-  matcher.js             Filename cleaning + suggestion scoring
-  binder.js               Click-to-bind element picker + storage
-  queue.js                 Batch queue: matches, fills, pauses on ambiguity
+                         attachment via DataTransfer, drag/drop replay,
+                         list-item vs. single-element selector generation)
+  matcher.js             Filename cleaning + suggestion/option scoring
+  binder.js               Click-to-bind element picker (Alt+click to
+                            confirm) + storage
+  queue.js                 Batch queue: replays Add file -> Source format
+                            -> Entity name -> File -> Upload per file,
+                            waits for the entities grid, pauses on ambiguity
   dropzone.js               Floating drop panel UI
   setup-modal.js             "Bind D365 fields" modal
-  content.js                  Wires it all together, injects the launcher
+  content.js                  Wires it all together, injects the launcher,
+                                catches drops anywhere on the page
 options/                Settings page (cleaning rules, matching, bindings)
 popup/                  Toolbar popup (status + link to settings)
 styles/dropzone.css     All injected UI styling

@@ -78,8 +78,10 @@
     });
   }
 
-  // Builds a selector that survives page reloads: prefers D365's own
-  // data-dyn-controlname attribute, falls back to id, then a short DOM path.
+  // Builds a selector for a single, specific element that survives page
+  // reloads: prefers D365's own data-dyn-controlname attribute, falls back
+  // to id, then a DOM path indexed with :nth-of-type so it targets exactly
+  // this element and no sibling.
   function getSelector(el) {
     if (el.getAttribute && el.getAttribute('data-dyn-controlname')) {
       return `[data-dyn-controlname="${el.getAttribute('data-dyn-controlname')}"]`;
@@ -109,6 +111,55 @@
     return path.join(' > ');
   }
 
+  // Builds a selector for one item in a repeating list (an autocomplete
+  // suggestion, a dropdown option, a grid row) that's meant to match ALL of
+  // that item's siblings, not just the one clicked — deliberately omits any
+  // nth-of-type/nth-child indexing, unlike getSelector() above. Without
+  // this, binding "the 2nd suggestion in the list" would only ever match
+  // that exact position and never generalize to picking a different item.
+  function getGeneralizedListSelector(el) {
+    if (el.className && typeof el.className === 'string') {
+      const classes = el.className.trim().split(/\s+/).filter(Boolean);
+      if (classes.length) {
+        const selector = el.tagName.toLowerCase() + '.' + classes.map((c) => CSS.escape(c)).join('.');
+        if (document.querySelectorAll(selector).length >= 1) return selector;
+      }
+    }
+    if (el.getAttribute && el.getAttribute('role')) {
+      return `${el.tagName.toLowerCase()}[role="${el.getAttribute('role')}"]`;
+    }
+    const parent = el.parentElement;
+    if (parent && parent.className && typeof parent.className === 'string') {
+      const pClass = parent.className.trim().split(/\s+/).filter(Boolean)[0];
+      if (pClass) return `.${CSS.escape(pClass)} > ${el.tagName.toLowerCase()}`;
+    }
+    return el.tagName.toLowerCase();
+  }
+
+  function clickElement(el) {
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+
+  function isNativeSelect(el) {
+    return el && el.tagName === 'SELECT';
+  }
+
+  // Sets a native <select>'s value by matching one of its options' visible
+  // text (case-insensitive, trimmed) and dispatches change.
+  function selectNativeOption(selectEl, optionText) {
+    const options = Array.from(selectEl.options || []);
+    const match = options.find(
+      (o) => o.textContent.trim().toLowerCase() === optionText.trim().toLowerCase()
+    );
+    if (!match) return false;
+    selectEl.value = match.value;
+    fireEvent(selectEl, 'input');
+    fireEvent(selectEl, 'change');
+    return true;
+  }
+
   D365IA.domUtils = {
     setNativeValue,
     fireEvent,
@@ -116,6 +167,10 @@
     dropFileOnInput,
     dropFileOnDropTarget,
     waitFor,
-    getSelector
+    getSelector,
+    getGeneralizedListSelector,
+    clickElement,
+    isNativeSelect,
+    selectNativeOption
   };
 })();

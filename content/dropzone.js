@@ -68,10 +68,13 @@
       fileInput.value = '';
     });
 
+    const REQUIRED_ROLES = ['addFileButton', 'sourceFormatField', 'entityNameField', 'fileTarget', 'uploadButton'];
+
     runBtn.addEventListener('click', async () => {
       const bindings = await getBindings();
-      if (!bindings.entityNameField || !bindings.fileTarget) {
-        setStatus('Bind the Entity name field and File target first (Setup fields).', 'warn');
+      const missing = REQUIRED_ROLES.filter((role) => !bindings[role] || !bindings[role].selector);
+      if (missing.length > 0) {
+        setStatus(`Bind these fields first (Setup fields): ${missing.join(', ')}.`, 'warn');
         return;
       }
       const settings = await getSettings();

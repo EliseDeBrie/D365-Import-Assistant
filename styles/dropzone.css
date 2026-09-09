@@ -124,7 +124,8 @@
   border-color: #ef6c00;
   background: #fff8ee;
 }
-.d365ia-status-matching {
+.d365ia-status-matching,
+.d365ia-status-uploading {
   border-color: #0078d4;
 }
 
@@ -201,6 +202,28 @@
   width: 480px;
   max-height: 80vh;
   overflow-y: auto;
+  color: #222;
+}
+
+#d365ia-setup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+#d365ia-setup-header h3 {
+  margin: 0;
+}
+#d365ia-setup-x {
+  background: transparent;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: #666;
+  padding: 4px 8px;
+}
+#d365ia-setup-x:hover {
   color: #222;
 }
 

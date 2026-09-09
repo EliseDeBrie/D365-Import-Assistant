@@ -24,16 +24,36 @@
     </section>
 
     <section>
-      <h2>Matching</h2>
+      <h2>Matching &amp; timing</h2>
       <label
         >Match confidence threshold (0–1):
         <input type="number" id="matchThreshold" min="0" max="1" step="0.05" />
       </label>
       <label
-        >Delay between files (ms):
+        >Pause between files (ms):
         <input type="number" id="stepDelay" min="0" step="100" />
       </label>
-      <label><input type="checkbox" id="autoAddRow" /> Automatically click "Add row" between files</label>
+      <label
+        >Max wait for a file to finish uploading (ms):
+        <input type="number" id="uploadTimeout" min="1000" step="1000" />
+      </label>
+      <p class="hint">
+        If you bind "entities grid row", the extension waits for a new row to appear there
+        (up to this timeout) before starting the next file. Otherwise it just pauses for the
+        "Pause between files" duration and assumes it's done.
+      </p>
+    </section>
+
+    <section>
+      <h2>Auto-run import (off by default)</h2>
+      <label
+        ><input type="checkbox" id="autoRunImport" /> After the whole batch is uploaded, click the
+        page-level Import/Run button too</label
+      >
+      <p class="hint">
+        Leave this off to review the uploaded rows yourself and click Import in D365. Only takes
+        effect if "runImportButton" is bound.
+      </p>
     </section>
 
     <section>

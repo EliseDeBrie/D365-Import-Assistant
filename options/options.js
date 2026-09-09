@@ -1,4 +1,4 @@
-const FIELDS = [
+const CLEANING_FIELDS = [
   'stripLeadingNumbers',
   'stripTrailingNumbers',
   'stripDates',
@@ -12,16 +12,17 @@ async function load() {
   const settings = data.settings || {};
   const rules = Object.assign({}, window.D365IA.matcher.DEFAULT_RULES, settings.rules || {});
   const options = Object.assign(
-    { matchThreshold: 0.75, stepDelay: 700, autoAddRow: true },
+    { matchThreshold: 0.75, stepDelay: 700, uploadTimeout: 60000, autoRunImport: false },
     settings.options || {}
   );
 
-  FIELDS.forEach((f) => {
+  CLEANING_FIELDS.forEach((f) => {
     document.getElementById(f).checked = !!rules[f];
   });
   document.getElementById('matchThreshold').value = options.matchThreshold;
   document.getElementById('stepDelay').value = options.stepDelay;
-  document.getElementById('autoAddRow').checked = !!options.autoAddRow;
+  document.getElementById('uploadTimeout').value = options.uploadTimeout;
+  document.getElementById('autoRunImport').checked = !!options.autoRunImport;
 
   renderBindings(data.bindings || {});
   runTest();
@@ -44,7 +45,7 @@ function renderBindings(bindings) {
 
 function currentRules() {
   const rules = {};
-  FIELDS.forEach((f) => (rules[f] = document.getElementById(f).checked));
+  CLEANING_FIELDS.forEach((f) => (rules[f] = document.getElementById(f).checked));
   rules.stripExtension = true;
   rules.collapseWhitespace = true;
   return rules;
@@ -58,7 +59,7 @@ function runTest() {
   );
 }
 
-FIELDS.forEach((f) => document.getElementById(f).addEventListener('change', runTest));
+CLEANING_FIELDS.forEach((f) => document.getElementById(f).addEventListener('change', runTest));
 document.getElementById('testInput').addEventListener('input', runTest);
 
 document.getElementById('save').addEventListener('click', async () => {
@@ -66,7 +67,8 @@ document.getElementById('save').addEventListener('click', async () => {
     matchThreshold: parseFloat(document.getElementById('matchThreshold').value) || 0.75,
     stepDelay: parseInt(document.getElementById('stepDelay').value, 10) || 700,
     suggestionTimeout: 2500,
-    autoAddRow: document.getElementById('autoAddRow').checked
+    uploadTimeout: parseInt(document.getElementById('uploadTimeout').value, 10) || 60000,
+    autoRunImport: document.getElementById('autoRunImport').checked
   };
 
   await chrome.storage.sync.set({ settings: { rules: currentRules(), options } });

@@ -68,3 +68,9 @@ button.secondary {
   margin-left: 10px;
   color: #2e7d32;
 }
+
+.hint {
+  color: #666;
+  font-size: 12px;
+  margin: 4px 0 0;
+}

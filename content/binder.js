@@ -4,7 +4,28 @@
   // Roles the extension needs bound to real elements on the D365 page.
   // These are picked once by the user (click-to-bind) because D365's DOM
   // varies by version/customization and can't be safely hardcoded.
-  const ROLES = ['entityNameField', 'suggestionItem', 'fileTarget', 'addRowButton', 'importButton'];
+  //
+  // Matches the real Import screen flow: click Add file -> pick a Source
+  // data format -> (for Excel/CSV) type an Entity name and pick a
+  // suggestion -> attach the file -> click Upload -> a new row appears in
+  // the entities grid once it succeeds.
+  const ROLES = [
+    'addFileButton',
+    'sourceFormatField',
+    'sourceFormatOption',
+    'entityNameField',
+    'suggestionItem',
+    'fileTarget',
+    'uploadButton',
+    'entitiesGridRow',
+    'runImportButton'
+  ];
+
+  // Roles that identify one item in a repeating list rather than a single
+  // unique element — these need a selector that generalizes across
+  // siblings (see domUtils.getGeneralizedListSelector), not one pinned to
+  // the exact element clicked.
+  const LIST_ROLES = new Set(['sourceFormatOption', 'suggestionItem', 'entitiesGridRow']);
 
   let pickerActive = false;
   let pickerRole = null;
@@ -35,8 +56,10 @@
     e.preventDefault();
     e.stopPropagation();
     const el = e.target;
-    const selector = D365IA.domUtils.getSelector(el);
     const role = pickerRole;
+    const selector = LIST_ROLES.has(role)
+      ? D365IA.domUtils.getGeneralizedListSelector(el)
+      : D365IA.domUtils.getSelector(el);
     const cb = onPicked;
     stopPicking();
     if (cb) {
@@ -44,7 +67,8 @@
         role,
         selector,
         tag: el.tagName,
-        isFileInput: el.tagName === 'INPUT' && el.type === 'file'
+        isFileInput: el.tagName === 'INPUT' && el.type === 'file',
+        isSelect: el.tagName === 'SELECT'
       });
     }
   }
@@ -52,6 +76,8 @@
   function handleKeydown(e) {
     if (!pickerActive) return;
     if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
       const cancelCb = onCancelled;
       stopPicking();
       if (cancelCb) cancelCb();
@@ -113,11 +139,20 @@
     return bindings;
   }
 
+  async function clearBinding(role) {
+    const bindings = await getBindings();
+    delete bindings[role];
+    await chrome.storage.sync.set({ bindings });
+    return bindings;
+  }
+
   D365IA.binder = {
     ROLES,
+    LIST_ROLES,
     startPicking,
     stopPicking,
     getBindings,
-    saveBinding
+    saveBinding,
+    clearBinding
   };
 })();
