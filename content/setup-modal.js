@@ -122,8 +122,13 @@
       value.id = `d365ia-val-${role}`;
       value.textContent = 'not bound';
 
+      const match = document.createElement('span');
+      match.className = 'd365ia-setup-match';
+      match.id = `d365ia-match-${role}`;
+
       row.appendChild(top);
       row.appendChild(value);
+      row.appendChild(match);
       rows.appendChild(row);
     });
 
@@ -176,14 +181,47 @@
     return modal;
   }
 
+  // Reports what a saved selector actually matches on the page right now.
+  // A selector matching nothing (stale) or matching dozens of elements
+  // (mis-picked onto something generic) is the usual cause of a run failing,
+  // and is otherwise invisible until it errors mid-import.
+  function describeMatches(selector, role) {
+    let count;
+    try {
+      count = document.querySelectorAll(selector).length;
+    } catch (e) {
+      return { text: 'invalid selector', level: 'bad' };
+    }
+    if (count === 0) return { text: '0 on page now', level: 'warn' };
+    if (D365IA.binder.LIST_ROLES.has(role)) {
+      return count > 25
+        ? { text: `${count} matches — too generic?`, level: 'bad' }
+        : { text: `${count} matches`, level: 'ok' };
+    }
+    return count === 1
+      ? { text: '1 match', level: 'ok' }
+      : { text: `${count} matches — ambiguous`, level: 'warn' };
+  }
+
   async function refreshValues() {
     const bindings = await D365IA.binder.getBindings();
     D365IA.binder.ROLES.forEach((role) => {
       const el = document.getElementById(`d365ia-val-${role}`);
       if (!el) return;
-      const selector = (bindings[role] && bindings[role].selector) || 'not bound';
-      el.textContent = selector;
-      el.title = selector;
+      const selector = bindings[role] && bindings[role].selector;
+      el.textContent = selector || 'not bound';
+      el.title = selector || '';
+
+      const status = document.getElementById(`d365ia-match-${role}`);
+      if (!status) return;
+      if (!selector) {
+        status.textContent = '';
+        status.className = 'd365ia-setup-match';
+        return;
+      }
+      const match = describeMatches(selector, role);
+      status.textContent = match.text;
+      status.className = `d365ia-setup-match d365ia-match-${match.level}`;
     });
   }
 

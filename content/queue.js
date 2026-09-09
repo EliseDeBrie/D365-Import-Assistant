@@ -91,6 +91,32 @@
       return domUtils.queryVisible(binding.selector);
     }
 
+    // Elements in a suggestion/option list are never form controls. A
+    // binding that resolves to inputs was mis-picked (it typically matches
+    // every field on the page), and acting on it would click something
+    // arbitrary — so ignore those and let the caller fall back to typing.
+    function listCandidates(selector) {
+      if (!selector) return [];
+      return domUtils
+        .queryAllVisible(selector)
+        .filter((el) => !['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+    }
+
+    // Opens the Add file panel, retrying with a native click if D365 ignored
+    // the synthetic event sequence.
+    async function openAddFilePanel(bindings, options) {
+      const addFileEl = await requireBoundEl(bindings, 'addFileButton', options);
+      domUtils.clickElement(addFileEl);
+
+      const opened = await domUtils
+        .waitFor(() => findBoundEl(bindings, 'sourceFormatField'), {
+          timeout: (options && options.elementTimeout) || 5000
+        })
+        .catch(() => null);
+
+      if (!opened && typeof addFileEl.click === 'function') addFileEl.click();
+    }
+
     // Sets a dropdown to desiredText. Native <select> is set directly;
     // otherwise it opens the control and clicks the best-matching option if
     // an option selector is bound, and falls back to typing the value into
@@ -108,10 +134,10 @@
 
       if (optionSelector) {
         try {
-          await domUtils.waitFor(() => domUtils.queryAllVisible(optionSelector).length > 0, {
+          await domUtils.waitFor(() => listCandidates(optionSelector).length > 0, {
             timeout: options.elementTimeout || 5000
           });
-          const optionEls = domUtils.queryAllVisible(optionSelector);
+          const optionEls = listCandidates(optionSelector);
           const texts = optionEls.map((el) => el.textContent.trim());
           const { candidate, score } = matcher.bestMatch(desiredText, texts);
           if (candidate && score >= 0.5) {
@@ -130,9 +156,9 @@
     }
 
     function selectSuggestion(suggestionSelector, candidateText) {
-      const el = domUtils
-        .queryAllVisible(suggestionSelector)
-        .find((e) => e.textContent.trim() === candidateText);
+      const el = listCandidates(suggestionSelector).find(
+        (e) => e.textContent.trim() === candidateText
+      );
       if (!el) return false;
       domUtils.clickElement(el);
       return true;
@@ -167,10 +193,10 @@
       let suggestions = [];
       if (suggestionSelector) {
         try {
-          await domUtils.waitFor(() => domUtils.queryAllVisible(suggestionSelector).length > 0, {
+          await domUtils.waitFor(() => listCandidates(suggestionSelector).length > 0, {
             timeout: options.elementTimeout || 5000
           });
-          suggestions = domUtils.queryAllVisible(suggestionSelector).map((el) => el.textContent.trim());
+          suggestions = listCandidates(suggestionSelector).map((el) => el.textContent.trim());
         } catch (e) {
           suggestions = [];
         }
@@ -210,7 +236,7 @@
         // Clicking "Add file" while its panel is already open closes it
         // again, so only click when the panel isn't showing.
         if (!findBoundEl(bindings, 'sourceFormatField')) {
-          domUtils.clickElement(await requireBoundEl(bindings, 'addFileButton', options));
+          await openAddFilePanel(bindings, options);
         }
 
         const formatFieldEl = await requireBoundEl(bindings, 'sourceFormatField', options);

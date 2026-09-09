@@ -127,21 +127,53 @@
     hideHint();
   }
 
-  // Older versions could bake this extension's own hover-highlight class
-  // into a saved selector, which then never matched anything again. Strip it
-  // from whatever is already stored rather than making people rebind.
-  function sanitizeSelector(selector) {
-    return selector.replace(/\.d365ia-[\w-]+/g, '').trim();
+  const GENERATED_ID_RE = /^\d+_\d+_(.+)$/;
+
+  function unescapeCssIdent(ident) {
+    return ident
+      .replace(/\\([0-9a-fA-F]{1,6})[ ]?/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+      .replace(/\\(.)/g, '$1');
+  }
+
+  // Repairs selectors saved by earlier versions:
+  //  - strips this extension's own hover-highlight class, which only exists
+  //    while the mouse is over the element during binding, so any selector
+  //    containing it could never match again;
+  //  - rewrites "#31_5_SourceNameControl_input" to its stable suffix form,
+  //    since D365 regenerates those instance counters whenever it rebuilds
+  //    the control.
+  function migrateSelector(selector) {
+    let migrated = selector.replace(/\.d365ia-[\w-]+/g, '').trim();
+
+    // CSS.escape writes a leading digit as a hex escape followed by a space
+    // ("#\\33 1_5_Foo_input"), so the id can't be matched with \S+ — unescape
+    // first, then confirm it really is a single id and not a compound
+    // selector that merely starts with one.
+    const idOnly = /^#(.+)$/.exec(migrated);
+    if (idOnly) {
+      const rawId = unescapeCssIdent(idOnly[1]);
+      const generated = GENERATED_ID_RE.exec(rawId);
+      if (generated && !/\s/.test(rawId)) migrated = `[id$="_${generated[1]}"]`;
+    }
+    return migrated;
   }
 
   async function getBindings() {
     const data = await chrome.storage.sync.get('bindings');
     const bindings = data.bindings || {};
+    let changed = false;
+
     Object.keys(bindings).forEach((role) => {
-      if (bindings[role] && bindings[role].selector) {
-        bindings[role].selector = sanitizeSelector(bindings[role].selector);
+      const binding = bindings[role];
+      if (!binding || !binding.selector) return;
+      const migrated = migrateSelector(binding.selector);
+      if (migrated !== binding.selector) {
+        binding.selector = migrated;
+        changed = true;
       }
     });
+
+    if (changed) await chrome.storage.sync.set({ bindings });
     return bindings;
   }
 

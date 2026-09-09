@@ -306,10 +306,21 @@
     return all.length === 1 ? all[0] : null;
   }
 
+  // D365's client framework binds to pointer events, not just mouse events,
+  // so a mousedown/mouseup/click trio alone can be ignored entirely.
   function clickElement(el) {
-    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    const base = { bubbles: true, cancelable: true, composed: true, view: window, button: 0 };
+    const pointer = Object.assign({ pointerType: 'mouse', isPrimary: true }, base);
+
+    if (window.PointerEvent) {
+      el.dispatchEvent(new PointerEvent('pointerdown', Object.assign({ buttons: 1 }, pointer)));
+    }
+    el.dispatchEvent(new MouseEvent('mousedown', Object.assign({ buttons: 1 }, base)));
+    if (window.PointerEvent) {
+      el.dispatchEvent(new PointerEvent('pointerup', Object.assign({ buttons: 0 }, pointer)));
+    }
+    el.dispatchEvent(new MouseEvent('mouseup', base));
+    el.dispatchEvent(new MouseEvent('click', base));
   }
 
   // Sets a native <select>'s value by matching one of its options' visible

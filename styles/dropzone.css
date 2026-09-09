@@ -311,6 +311,29 @@
   text-overflow: ellipsis;
 }
 
+.d365ia-setup-match {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  border-radius: 3px;
+  padding: 0 5px;
+}
+.d365ia-setup-match:empty {
+  display: none;
+}
+.d365ia-match-ok {
+  background: #e8f4e8;
+  color: #2e7d32;
+}
+.d365ia-match-warn {
+  background: #fff3e0;
+  color: #b04a00;
+}
+.d365ia-match-bad {
+  background: #fdecea;
+  color: #c62828;
+}
+
 .d365ia-setup-bind {
   flex-shrink: 0;
   padding: 4px 8px;
