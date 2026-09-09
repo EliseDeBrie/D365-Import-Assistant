@@ -167,9 +167,17 @@
           const texts = optionEls.map((el) => el.textContent.trim());
           const { candidate, score } = matcher.bestMatch(desiredText, texts);
           if (candidate && score >= 0.5) {
-            const chosenEl = optionEls.find((el) => el.textContent.trim() === candidate);
+            // A bare sheet name (from workbook.xml) can match more than one
+            // option equally well — normalizing strips "$", so "en_us" and
+            // the classic Excel/OLEDB whole-sheet range "en_us$" score the
+            // same. Prefer the "$" form among ties: that's what a plain
+            // sheet-name reference actually means in this convention, as
+            // opposed to a same-named table or named range.
+            const tied = texts.filter((t) => matcher.scoreMatch(desiredText, t) >= score);
+            const preferred = tied.find((t) => t.endsWith('$')) || candidate;
+            const chosenEl = optionEls.find((el) => el.textContent.trim() === preferred);
             domUtils.clickElement(chosenEl);
-            return { value: candidate, viaOption: true };
+            return { value: preferred, viaOption: true };
           }
         } catch (e) {
           // Fall through to typing the value instead.
