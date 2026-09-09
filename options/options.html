@@ -34,6 +34,15 @@
         <input type="number" id="stepDelay" min="0" step="100" />
       </label>
       <label
+        >Max wait for each UI step to appear (ms):
+        <input type="number" id="elementTimeout" min="500" step="500" />
+      </label>
+      <p class="hint">
+        How long to wait for a bound field to show up after a click (e.g. the Source data
+        format dropdown after Add file, or the Entity name field after picking a format). If
+        D365 is slow to render for you, raise this.
+      </p>
+      <label
         >Max wait for a file to finish uploading (ms):
         <input type="number" id="uploadTimeout" min="1000" step="1000" />
       </label>

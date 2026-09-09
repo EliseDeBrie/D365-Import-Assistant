@@ -76,7 +76,7 @@
       }
       try {
         return await domUtils.waitFor(() => document.querySelector(binding.selector), {
-          timeout: (options && options.suggestionTimeout) || 2500
+          timeout: (options && options.elementTimeout) || 5000
         });
       } catch (e) {
         throw new Error(`Bound element for "${role}" didn't show up on the page in time.`);
@@ -96,7 +96,7 @@
 
       domUtils.clickElement(fieldEl);
       await domUtils.waitFor(() => document.querySelectorAll(optionSelector).length > 0, {
-        timeout: options.suggestionTimeout || 2500
+        timeout: options.elementTimeout || 5000
       });
       const optionEls = Array.from(document.querySelectorAll(optionSelector));
       const texts = optionEls.map((el) => el.textContent.trim());
@@ -143,7 +143,7 @@
       if (suggestionSelector) {
         try {
           await domUtils.waitFor(() => document.querySelectorAll(suggestionSelector).length > 0, {
-            timeout: options.suggestionTimeout || 2500
+            timeout: options.elementTimeout || 5000
           });
           suggestions = Array.from(document.querySelectorAll(suggestionSelector)).map((el) =>
             el.textContent.trim()
@@ -183,9 +183,12 @@
 
         const formatFieldEl = await requireBoundEl(bindings, 'sourceFormatField', options);
         const formatOptionSelector = bindings.sourceFormatOption && bindings.sourceFormatOption.selector;
-        if (formatOptionSelector || domUtils.isNativeSelect(formatFieldEl)) {
-          await pickFromDropdown(formatFieldEl, formatOptionSelector, item.sourceFormat, options);
+        if (!formatOptionSelector && !domUtils.isNativeSelect(formatFieldEl)) {
+          throw new Error(
+            '"sourceFormatOption" isn\'t bound — open Setup fields, open the Source data format dropdown, and Alt+click one option (e.g. "Excel") to bind it.'
+          );
         }
+        await pickFromDropdown(formatFieldEl, formatOptionSelector, item.sourceFormat, options);
 
         const matchResult = await matchEntityName(id, item, bindings, options);
         if (matchResult.needsReview) return { needsReview: true };

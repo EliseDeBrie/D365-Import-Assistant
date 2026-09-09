@@ -12,8 +12,9 @@ const DEFAULT_SETTINGS = {
   options: {
     matchThreshold: 0.75,
     stepDelay: 700,
-    suggestionTimeout: 2500,
-    autoAddRow: true
+    elementTimeout: 5000,
+    uploadTimeout: 60000,
+    autoRunImport: false
   }
 };
 

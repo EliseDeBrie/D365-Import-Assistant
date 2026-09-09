@@ -12,7 +12,7 @@ async function load() {
   const settings = data.settings || {};
   const rules = Object.assign({}, window.D365IA.matcher.DEFAULT_RULES, settings.rules || {});
   const options = Object.assign(
-    { matchThreshold: 0.75, stepDelay: 700, uploadTimeout: 60000, autoRunImport: false },
+    { matchThreshold: 0.75, stepDelay: 700, elementTimeout: 5000, uploadTimeout: 60000, autoRunImport: false },
     settings.options || {}
   );
 
@@ -21,6 +21,7 @@ async function load() {
   });
   document.getElementById('matchThreshold').value = options.matchThreshold;
   document.getElementById('stepDelay').value = options.stepDelay;
+  document.getElementById('elementTimeout').value = options.elementTimeout;
   document.getElementById('uploadTimeout').value = options.uploadTimeout;
   document.getElementById('autoRunImport').checked = !!options.autoRunImport;
 
@@ -66,7 +67,7 @@ document.getElementById('save').addEventListener('click', async () => {
   const options = {
     matchThreshold: parseFloat(document.getElementById('matchThreshold').value) || 0.75,
     stepDelay: parseInt(document.getElementById('stepDelay').value, 10) || 700,
-    suggestionTimeout: 2500,
+    elementTimeout: parseInt(document.getElementById('elementTimeout').value, 10) || 5000,
     uploadTimeout: parseInt(document.getElementById('uploadTimeout').value, 10) || 60000,
     autoRunImport: document.getElementById('autoRunImport').checked
   };

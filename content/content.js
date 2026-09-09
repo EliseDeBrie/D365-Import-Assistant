@@ -11,7 +11,7 @@
         {
           matchThreshold: 0.75,
           stepDelay: 700,
-          suggestionTimeout: 2500,
+          elementTimeout: 5000,
           uploadTimeout: 60000,
           autoRunImport: false
         },
