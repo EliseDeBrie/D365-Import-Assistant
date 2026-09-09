@@ -65,16 +65,22 @@
       emit();
     }
 
-    function requireBoundEl(bindings, role) {
+    // Waits for the bound element to show up rather than checking once —
+    // D365 re-renders the row after every click (Add file, picking a
+    // format, etc), so the next element in the sequence often doesn't
+    // exist in the DOM yet at the instant we go looking for it.
+    async function requireBoundEl(bindings, role, options) {
       const binding = bindings[role];
       if (!binding || !binding.selector) {
         throw new Error(`"${role}" isn't bound yet — open Setup fields.`);
       }
-      const el = document.querySelector(binding.selector);
-      if (!el) {
-        throw new Error(`Bound element for "${role}" isn't on the page right now.`);
+      try {
+        return await domUtils.waitFor(() => document.querySelector(binding.selector), {
+          timeout: (options && options.suggestionTimeout) || 2500
+        });
+      } catch (e) {
+        throw new Error(`Bound element for "${role}" didn't show up on the page in time.`);
       }
-      return el;
     }
 
     // Opens a dropdown/select control and picks the option whose text best
@@ -129,7 +135,7 @@
     // autocomplete. Returns { needsReview: true } if the match isn't
     // confident enough to proceed unattended.
     async function matchEntityName(id, item, bindings, options) {
-      const entityFieldEl = requireBoundEl(bindings, 'entityNameField');
+      const entityFieldEl = await requireBoundEl(bindings, 'entityNameField', options);
       domUtils.typeIntoField(entityFieldEl, item.cleanedName);
 
       const suggestionSelector = bindings.suggestionItem && bindings.suggestionItem.selector;
@@ -173,9 +179,9 @@
       try {
         const baselineCount = countGridRows(bindings);
 
-        domUtils.clickElement(requireBoundEl(bindings, 'addFileButton'));
+        domUtils.clickElement(await requireBoundEl(bindings, 'addFileButton', options));
 
-        const formatFieldEl = requireBoundEl(bindings, 'sourceFormatField');
+        const formatFieldEl = await requireBoundEl(bindings, 'sourceFormatField', options);
         const formatOptionSelector = bindings.sourceFormatOption && bindings.sourceFormatOption.selector;
         if (formatOptionSelector || domUtils.isNativeSelect(formatFieldEl)) {
           await pickFromDropdown(formatFieldEl, formatOptionSelector, item.sourceFormat, options);
@@ -184,10 +190,10 @@
         const matchResult = await matchEntityName(id, item, bindings, options);
         if (matchResult.needsReview) return { needsReview: true };
 
-        attachFile(requireBoundEl(bindings, 'fileTarget'), item.file);
+        attachFile(await requireBoundEl(bindings, 'fileTarget', options), item.file);
 
         updateItem(id, { status: 'uploading' });
-        domUtils.clickElement(requireBoundEl(bindings, 'uploadButton'));
+        domUtils.clickElement(await requireBoundEl(bindings, 'uploadButton', options));
 
         if (baselineCount !== null) {
           await domUtils.waitFor(() => countGridRows(bindings) > baselineCount, {
@@ -248,9 +254,9 @@
         if (suggestionSelector) selectSuggestion(suggestionSelector, chosenSuggestionText);
 
         const baselineCount = countGridRows(bindings);
-        attachFile(requireBoundEl(bindings, 'fileTarget'), item.file);
+        attachFile(await requireBoundEl(bindings, 'fileTarget', options), item.file);
         updateItem(id, { status: 'uploading', matchedEntity: chosenSuggestionText });
-        domUtils.clickElement(requireBoundEl(bindings, 'uploadButton'));
+        domUtils.clickElement(await requireBoundEl(bindings, 'uploadButton', options));
 
         if (baselineCount !== null) {
           await domUtils.waitFor(() => countGridRows(bindings) > baselineCount, {
