@@ -56,13 +56,16 @@ real click sequence:
    **Done**, or by clicking outside it.
    - **Add file button** — click it once yourself first so a row exists,
      then Alt+click the button itself.
-   - **Source data format dropdown** — Alt+click the dropdown control on that
-     row (before opening it).
-   - **Source data format option** — click the dropdown open, then Alt+click
-     one option (e.g. "Excel") in the list. This needs to match *any* option
-     in that list, not just the one you clicked — if picking a different file
-     later lands on the wrong option, rebind on an option in a different
-     position and see the **Notes on binding a list** section below.
+   - **Source data format dropdown** — while it's still *closed*, Alt+click
+     anywhere in the box (the value or placeholder text is fine — not
+     specifically the little arrow icon). Don't open it first for this one.
+   - **Source data format option** — a *different* element from the box
+     above. First click the box normally (no Alt) so its list opens, *then*
+     Alt+click one option (e.g. "Excel") inside that open list. This needs
+     to match *any* option in the list, not just the one you clicked — if
+     picking a different file later lands on the wrong option, rebind on an
+     option in a different position and see **Notes on binding a list**
+     below.
    - **Entity name field** — pick a format first so the field appears, then
      Alt+click it directly.
    - **Suggestion row** — type a few letters into the entity field so D365's

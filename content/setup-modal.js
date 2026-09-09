@@ -5,8 +5,8 @@
   // screen. Longer how-to text lives in ROLE_HINTS, shown under the label.
   const ROLE_LABELS = {
     addFileButton: 'Add file button',
-    sourceFormatField: 'Source data format dropdown',
-    sourceFormatOption: 'One option in that dropdown’s open list',
+    sourceFormatField: 'Source data format — the closed box',
+    sourceFormatOption: 'Source data format — one item in the opened list',
     entityNameField: 'Entity name field',
     suggestionItem: 'One row in the entity name suggestions',
     fileTarget: 'File input / drop target',
@@ -17,8 +17,10 @@
 
   const ROLE_HINTS = {
     addFileButton: 'Adds a new row to fill in.',
-    sourceFormatField: 'Alt+click the closed dropdown control on the row.',
-    sourceFormatOption: 'Open the dropdown, then Alt+click one option (e.g. "Excel").',
+    sourceFormatField:
+      'While the list is still CLOSED: Alt+click anywhere in the box (the value/placeholder text is fine — not specifically the little arrow). Don\'t open it first.',
+    sourceFormatOption:
+      'Click the box normally (no Alt) to open its list, THEN Alt+click one item inside it, e.g. "Excel". This is a different element from the box itself.',
     entityNameField: 'Pick a format first so this field appears, then Alt+click it.',
     suggestionItem: 'Type a few letters into the entity field to open the list first.',
     fileTarget: 'The row’s file input or drop target.',
