@@ -47,10 +47,19 @@ from the cleaned-up file name, then attaches the file — no typing per file.
    ever typed in blind without going through D365's real autocomplete, so a
    bad guess can't silently attach the wrong entity.
 
-The per-row **Upload** is automated (it's just staging that one file), but the
-extension never auto-clicks the page-level **Import/Run** button that actually
-loads everything into D365 — that stays a manual, deliberate step unless you
-explicitly turn on auto-run in Settings.
+## Two run buttons
+
+- **Upload** — uploads every queued file as an entity and stops there,
+  leaving the Add file panel open and the import unstarted.
+- **Upload + Import** — does the same, then closes the Add file panel and
+  clicks the page-level Import button, so a whole batch can be started and
+  left to run.
+
+The import step is a separate button rather than a setting, because it's the
+one that actually loads data into D365. It only fires when *every* queued
+file uploaded successfully — a batch that paused for review, errored, or had
+a file skipped never triggers an import — and needs `runImportButton` bound
+(plus `closePanelButton` to close the panel first).
 
 ## One-time setup: bind fields
 

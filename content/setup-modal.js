@@ -14,6 +14,7 @@
     sheetSelectField: 'Sheet picker shown for multi-sheet workbooks',
     sheetOption: 'One item in that sheet picker’s open list',
     entitiesGridRow: 'One row in the uploaded-entities grid',
+    closePanelButton: 'Close button on the Add file panel',
     runImportButton: 'Page-level Import/Run button'
   };
 
@@ -34,13 +35,17 @@
     sheetOption: 'Open that sheet picker, then Alt+click one sheet name in the list.',
     entitiesGridRow:
       'Add one file manually first so a row exists to click. Used to detect success — falls back to a fixed pause if left unbound.',
-    runImportButton: 'Only clicked if auto-run is turned on in Settings; otherwise never touched.'
+    closePanelButton:
+      'Used by "Upload + Import" to close the panel before starting the import. Never clicked by a plain upload run.',
+    runImportButton:
+      'Only clicked by the "Upload + Import" button, and only once every file uploaded. A plain upload run never touches it.'
   };
 
   const OPTIONAL_ROLES = new Set([
     'sheetSelectField',
     'sheetOption',
     'entitiesGridRow',
+    'closePanelButton',
     'runImportButton'
   ]);
 

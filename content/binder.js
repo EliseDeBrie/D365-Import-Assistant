@@ -20,6 +20,7 @@
     'sheetSelectField',
     'sheetOption',
     'entitiesGridRow',
+    'closePanelButton',
     'runImportButton'
   ];
 

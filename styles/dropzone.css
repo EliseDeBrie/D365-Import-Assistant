@@ -194,11 +194,16 @@
   border-color: #0078d4;
 }
 
-#d365ia-actions {
+#d365ia-actions,
+#d365ia-actions-secondary {
   display: flex;
   gap: 6px;
 }
-#d365ia-actions button {
+#d365ia-actions {
+  margin-bottom: 6px;
+}
+#d365ia-actions button,
+#d365ia-actions-secondary button {
   flex: 1;
   padding: 6px 4px;
   border: 1px solid #ccc;
@@ -210,6 +215,12 @@
   background: #0078d4;
   color: #fff;
   border-color: #0078d4;
+}
+/* Distinct colour because this one actually starts the import. */
+#d365ia-actions #d365ia-run-import {
+  background: #107c10;
+  color: #fff;
+  border-color: #107c10;
 }
 
 .d365ia-hover-highlight {

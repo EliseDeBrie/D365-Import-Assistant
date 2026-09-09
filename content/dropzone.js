@@ -24,7 +24,10 @@
         <div id="d365ia-status-bar"></div>
         <ul id="d365ia-queue-list"></ul>
         <div id="d365ia-actions">
-          <button id="d365ia-run">Start</button>
+          <button id="d365ia-run" title="Upload every queued file as an entity, then stop">Upload</button>
+          <button id="d365ia-run-import" title="Upload everything, close the Add file panel, then start the import job">Upload + Import</button>
+        </div>
+        <div id="d365ia-actions-secondary">
           <button id="d365ia-clear">Clear</button>
           <button id="d365ia-setup">Setup fields</button>
         </div>
@@ -37,6 +40,7 @@
     const list = panel.querySelector('#d365ia-queue-list');
     const statusBar = panel.querySelector('#d365ia-status-bar');
     const runBtn = panel.querySelector('#d365ia-run');
+    const runImportBtn = panel.querySelector('#d365ia-run-import');
     const clearBtn = panel.querySelector('#d365ia-clear');
     const setupBtn = panel.querySelector('#d365ia-setup');
     const entityStatus = panel.querySelector('#d365ia-entity-status');
@@ -102,22 +106,53 @@
 
     const REQUIRED_ROLES = ['addFileButton', 'sourceFormatField', 'entityNameField', 'fileTarget'];
 
-    runBtn.addEventListener('click', async () => {
+    // Two modes: upload the entities and stop, or upload and then actually
+    // kick off the import. The import step is deliberately a separate button
+    // rather than a setting, since it's the one that loads data into D365.
+    async function startRun(alsoImport) {
       const bindings = await getBindings();
       const missing = REQUIRED_ROLES.filter((role) => !bindings[role] || !bindings[role].selector);
+      if (alsoImport && (!bindings.runImportButton || !bindings.runImportButton.selector)) {
+        missing.push('runImportButton');
+      }
       if (missing.length > 0) {
         setStatus(`Bind these fields first (Setup fields): ${missing.join(', ')}.`, 'warn');
         return;
       }
+
       const settings = await getSettings();
       setStatus('Running...');
       await queue.run(bindings, settings.options);
+
       if (queue.isPaused()) {
         setStatus('Paused — an item needs your review below.', 'warn');
-      } else {
-        setStatus('Done.');
+        return;
       }
-    });
+
+      const items = queue.getItems();
+      const allUploaded = items.length > 0 && items.every((it) => it.status === 'filled');
+
+      if (!alsoImport) {
+        setStatus(allUploaded ? 'All files uploaded.' : 'Done.');
+        return;
+      }
+
+      // Never start an import over a partial batch.
+      if (!allUploaded) {
+        setStatus('Not every file uploaded — import not started.', 'warn');
+        return;
+      }
+
+      try {
+        await queue.finishImport(bindings, settings.options);
+        setStatus('All files uploaded. Import started.');
+      } catch (e) {
+        setStatus(`Uploaded, but couldn't start the import: ${e.message}`, 'warn');
+      }
+    }
+
+    runBtn.addEventListener('click', () => startRun(false));
+    runImportBtn.addEventListener('click', () => startRun(true));
 
     clearBtn.addEventListener('click', () => {
       queue.clear();

@@ -420,13 +420,22 @@
         await sleep((options && options.stepDelay) || 700);
       }
       running = false;
+      emit();
+      return completedAll;
+    }
 
-      if (completedAll && options && options.autoRunImport && bindings.runImportButton && bindings.runImportButton.selector) {
-        const runBtn = document.querySelector(bindings.runImportButton.selector);
-        if (runBtn) domUtils.clickElement(runBtn);
+    // Closes the Add file panel and starts D365's import job. Only reached
+    // from the explicit "Upload + Import" button, never from a plain upload
+    // run — this is the step that actually loads data into D365.
+    async function finishImport(bindings, options) {
+      const closeEl = findBoundEl(bindings, 'closePanelButton');
+      if (closeEl) {
+        domUtils.clickElement(closeEl);
+        await sleep((options && options.stepDelay) || 700);
       }
 
-      emit();
+      const importEl = await requireBoundEl(bindings, 'runImportButton', options);
+      domUtils.clickElement(importEl);
     }
 
     function pause() {
@@ -477,6 +486,7 @@
       setSheet,
       clear,
       run,
+      finishImport,
       pause,
       resumeAfterReview,
       skip,
