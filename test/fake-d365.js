@@ -45,7 +45,13 @@ function install(window, options = {}) {
   // D365's lookups are text inputs backed by a flyout list. Typing filters
   // the list but does NOT set the value; ArrowDown highlights a row and
   // Enter commits it. Anything left as raw typed text is discarded on blur.
-  function makeLookup(controlName, getOptions) {
+  //
+  // `exact` models the sheet lookup specifically: it will only commit a value
+  // that matches a list entry outright. D365 reaches Excel through the ODBC
+  // driver, which names each worksheet "Sheet$", so typing the bare sheet name
+  // read out of the workbook matches nothing and never commits -- which is
+  // exactly what left the sheet step stuck.
+  function makeLookup(controlName, getOptions, { exact = false } = {}) {
     const wrap = document.createElement('div');
     wrap.setAttribute('data-dyn-controlname', controlName);
     const input = document.createElement('input');
@@ -63,6 +69,7 @@ function install(window, options = {}) {
 
     function currentMatches() {
       const typed = input.value.trim().toLowerCase();
+      if (exact) return getOptions().filter((o) => o.toLowerCase() === typed);
       return getOptions().filter((o) => o.toLowerCase().includes(typed));
     }
 
@@ -153,7 +160,13 @@ function install(window, options = {}) {
 
       const sheets = state.sheetsByFile[file.name] || [];
       if (sheets.length > 1 && !sheetLookup) {
-        sheetLookup = makeLookup('NewSheetLookupControl', () => sheets);
+        // D365 lists worksheets in the driver's "Sheet$" form, not the bare
+        // names that come out of xl/workbook.xml.
+        sheetLookup = makeLookup(
+          'NewSheetLookupControl',
+          () => sheets.map((name) => `${name}$`),
+          { exact: true }
+        );
         host.appendChild(sheetLookup.wrap);
       }
 

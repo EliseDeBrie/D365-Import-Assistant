@@ -33,6 +33,17 @@
       .replace(/[^a-z0-9]+/g, '');
   }
 
+  // D365 reaches Excel through the ODBC driver, which exposes each worksheet
+  // as "SheetName$" -- that trailing marker is what distinguishes the whole
+  // sheet from a named range over part of it. The sheet names read out of
+  // xl/workbook.xml have no "$", so typing one of those filters D365's sheet
+  // lookup to nothing and the value never commits. Add the marker when
+  // driving the lookup; the queue and the panel keep the plain name.
+  function sheetLookupText(sheetName) {
+    const name = String(sheetName || '');
+    return name.endsWith('$') ? name : `${name}$`;
+  }
+
   // Drives the batch through D365's real per-file sequence as a list of named
   // steps. Each step verifies its own outcome, so a failure names the step
   // that actually failed instead of surfacing two steps later as something
@@ -42,9 +53,22 @@
     let items = [];
     let running = false;
     let paused = false;
+    // null = not known yet, true = the page hook's upload signal reaches us,
+    // false = it doesn't in this environment. Learned from the first file so
+    // a batch never pays the timeout more than once: 20s x 37 files of
+    // waiting for a signal that was never coming is most of an afternoon.
+    let uploadSignalWorks = null;
 
+    // Notifying the UI must never be able to break the run: a render error
+    // reaching back into a step would fail the file it was working on, and
+    // one reaching run() itself would end the batch.
     function emit() {
-      if (onStatusChange) onStatusChange(items.slice());
+      if (!onStatusChange) return;
+      try {
+        onStatusChange(items.slice());
+      } catch (e) {
+        console.error('[D365 Import Assistant] panel render failed', e);
+      }
     }
 
     function addFiles(fileList, rules) {
@@ -336,8 +360,17 @@
       domUtils.armFileHook(ctx.item.file, ownerDocument);
 
       // D365 POSTs the file to /fileUpload; page-hook.js reports when that
-      // finishes, which is the most direct confirmation available.
-      const uploadResponse = domUtils.waitForUploadResponse(ctx.options.uploadTimeout || 300000);
+      // finishes. It corroborates the filename check below, so it gets a short
+      // grace window of its own -- NOT uploadTimeout, which is the multi-minute
+      // budget for the Excel driver to produce a grid row. The event can
+      // legitimately never arrive (fetch instead of XHR, a cross-origin frame),
+      // and blocking minutes per file on it is what stopped a batch part-way.
+      const signalTimeout =
+        uploadSignalWorks === false ? 0 : ctx.options.uploadSignalTimeout || 20000;
+      const uploadResponse =
+        signalTimeout > 0
+          ? domUtils.waitForUploadResponse(signalTimeout, ownerDocument)
+          : Promise.resolve(null);
 
       const browseEl = findBoundEl(ctx.bindings, 'uploadButton') || fileTargetEl;
       domUtils.clickElement(browseEl);
@@ -382,7 +415,12 @@
         );
       }
 
+      // A null here means the signal never came, which proves nothing either
+      // way -- D365 already showed the file name, so the run carries on.
       const response = await uploadResponse;
+      if (response) uploadSignalWorks = true;
+      else if (uploadSignalWorks === null) uploadSignalWorks = false;
+
       if (response && !response.ok) {
         throw stepError(
           'attach-file',
@@ -412,7 +450,7 @@
 
       const before = domUtils.readMessages();
       const optionSelector = ctx.bindings.sheetOption && ctx.bindings.sheetOption.selector;
-      await setLookupValue(sheetEl, optionSelector, ctx.item.selectedSheet, ctx.options);
+      await setLookupValue(sheetEl, optionSelector, sheetLookupText(ctx.item.selectedSheet), ctx.options);
 
       // Sheet names are read from this very file, so unlike an entity name
       // there's no label/technical mismatch to excuse a miss.
@@ -429,7 +467,9 @@
       if (!settled) {
         throw stepError(
           'sheet',
-          `couldn't set the sheet to "${ctx.item.selectedSheet}" — D365's sheet lookup needs a real selection, not just typed text.`,
+          `couldn't set the sheet to "${sheetLookupText(
+            ctx.item.selectedSheet
+          )}" — D365's sheet lookup needs a real selection from its list, not just typed text.`,
           domUtils.newMessagesSince(before)
         );
       }
@@ -522,10 +562,38 @@
     // After a failure the Add file panel can be left half-filled, which would
     // derail the next file too. Closing it makes the next item start clean.
     async function recoverPanel(bindings, options) {
-      const closeEl = findBoundEl(bindings, 'closePanelButton');
-      if (!closeEl) return;
-      domUtils.clickElement(closeEl);
+      try {
+        const closeEl = findBoundEl(bindings, 'closePanelButton');
+        if (!closeEl) return;
+        domUtils.clickElement(closeEl);
+      } catch (e) {
+        // The panel may already be gone, or the element torn down mid-click.
+        // Either way the next file re-opens it; this must not end the batch.
+      }
       await sleep((options && options.stepDelay) || 700);
+    }
+
+    // Every wait inside a step is bounded, but a step that somehow never
+    // returns would hang the whole batch with no way back. The watchdog is
+    // the backstop: deliberately generous (past even the slowest legitimate
+    // upload), it guarantees the queue always moves on to the next file.
+    function withWatchdog(promise, options) {
+      const opts = options || {};
+      const limit = opts.itemTimeout || (opts.uploadTimeout || 300000) + 120000;
+      let timer;
+      const watchdog = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            stepError(
+              'watchdog',
+              `this file made no progress for ${Math.round(
+                limit / 1000
+              )}s, so the run moved on to the next one.`
+            )
+          );
+        }, limit);
+      });
+      return Promise.race([promise, watchdog]).finally(() => clearTimeout(timer));
     }
 
     async function processItem(id, bindings, options, fromStep) {
@@ -533,7 +601,7 @@
       if (!item) return null;
 
       try {
-        return await runSteps(item, bindings, options, fromStep);
+        return await withWatchdog(runSteps(item, bindings, options, fromStep), options);
       } catch (err) {
         updateItem(id, { status: 'error', error: err.message, step: err.step || null });
         return { error: err.message };
@@ -542,25 +610,47 @@
 
     // One bad file shouldn't strand the other 36: a failure is recorded
     // against that item and the run moves on, with a summary at the end.
+    //
+    // The whole loop is guarded. Anything thrown outside processItem's own
+    // catch -- a stale element in recoverPanel, a render error reaching back
+    // through emit -- used to escape here and leave `running` stuck true, so
+    // every later press of Upload returned immediately and did nothing. The
+    // batch looked like it simply stopped part-way, permanently, until the
+    // page was reloaded.
     async function run(bindings, options) {
       if (running) return summary();
       running = true;
       paused = false;
+      let aborted = null;
 
-      while (!paused) {
-        const next = items.find((it) => it.status === 'pending');
-        if (!next) break;
+      try {
+        while (!paused) {
+          const next = items.find((it) => it.status === 'pending');
+          if (!next) break;
 
-        const result = await processItem(next.id, bindings, options || {});
-        if (result && (result.error || result.needsReview)) {
-          await recoverPanel(bindings, options);
+          const result = await processItem(next.id, bindings, options || {});
+          if (result && (result.error || result.needsReview)) {
+            await recoverPanel(bindings, options);
+          }
+          await sleep((options && options.stepDelay) || 700);
         }
-        await sleep((options && options.stepDelay) || 700);
+      } catch (err) {
+        // Record it against the file it happened on, so the panel shows why
+        // the run ended rather than just going quiet.
+        aborted = err;
+        const current = items.find((it) => it.status === 'running');
+        if (current) {
+          updateItem(current.id, {
+            status: 'error',
+            error: `the run stopped unexpectedly: ${err.message}`
+          });
+        }
+      } finally {
+        running = false;
+        emit();
       }
 
-      running = false;
-      emit();
-      return summary();
+      return Object.assign(summary(), { aborted: aborted ? aborted.message : null });
     }
 
     // Closes the Add file panel and starts D365's import job. Only reached
@@ -627,5 +717,5 @@
     };
   }
 
-  D365IA.queue = { createQueue, sourceFormatFor };
+  D365IA.queue = { createQueue, sourceFormatFor, sheetLookupText };
 })();

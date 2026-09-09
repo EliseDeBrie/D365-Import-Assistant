@@ -122,7 +122,16 @@
 
       const settings = await getSettings();
       setStatus('Running...');
-      const result = await queue.run(bindings, settings.options);
+
+      let result;
+      try {
+        result = await queue.run(bindings, settings.options);
+      } catch (e) {
+        // Leaving the bar reading "Running..." forever is how a stopped batch
+        // used to look like a batch still going.
+        setStatus(`The run stopped: ${e.message}`, 'warn');
+        return;
+      }
       const done = describeRun(result);
 
       if (!alsoImport) {
@@ -150,6 +159,9 @@
     // scrolling the list.
     function describeRun(s) {
       if (s.total === 0) return { text: 'Nothing in the queue.', level: 'warn' };
+      if (s.aborted) {
+        return { text: `Run stopped after ${s.uploaded} of ${s.total}: ${s.aborted}`, level: 'warn' };
+      }
       if (s.uploaded === s.total) return { text: `All ${s.total} file(s) uploaded.` };
 
       const parts = [`${s.uploaded} of ${s.total} uploaded`];
@@ -163,9 +175,12 @@
     async function rerun() {
       const bindings = await getBindings();
       const settings = await getSettings();
-      const result = await queue.run(bindings, settings.options);
-      const done = describeRun(result);
-      setStatus(done.text, done.level);
+      try {
+        const done = describeRun(await queue.run(bindings, settings.options));
+        setStatus(done.text, done.level);
+      } catch (e) {
+        setStatus(`The run stopped: ${e.message}`, 'warn');
+      }
     }
 
     runBtn.addEventListener('click', () => startRun(false));

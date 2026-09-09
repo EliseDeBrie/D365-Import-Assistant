@@ -66,19 +66,66 @@
     return nativeOpen.apply(this, arguments);
   };
 
+  // The upload can run inside one of D365's same-origin iframes, while the
+  // extension's queue is watching from the top frame. Announce it in both, so
+  // the queue hears it wherever the request was actually made.
+  function announceUploadFinished(detail) {
+    const targets = [window];
+    try {
+      if (window.top && window.top !== window) targets.push(window.top);
+    } catch (e) {
+      // Cross-origin top -- unreachable, and the local listener stands.
+    }
+    targets.forEach((target) => {
+      try {
+        target.dispatchEvent(new CustomEvent('d365ia:file-upload-finished', { detail }));
+      } catch (e) {
+        // Frame is gone or not reachable from here; nothing to do.
+      }
+    });
+  }
+
   const nativeSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function () {
     if (this.__d365iaIsFileUpload) {
       this.addEventListener('loadend', () => {
-        window.dispatchEvent(
-          new CustomEvent('d365ia:file-upload-finished', {
-            detail: { status: this.status, ok: this.status >= 200 && this.status < 300 }
-          })
-        );
+        announceUploadFinished({
+          status: this.status,
+          ok: this.status >= 200 && this.status < 300
+        });
       });
     }
     return nativeSend.apply(this, arguments);
   };
+
+  // Newer D365 builds send some uploads through fetch() rather than XHR.
+  // Without this, the completion signal simply never arrives for those.
+  const nativeFetch = window.fetch;
+  if (typeof nativeFetch === 'function') {
+    window.fetch = function (input, init) {
+      let isUpload = false;
+      try {
+        const url = typeof input === 'string' ? input : input && input.url;
+        isUpload = typeof url === 'string' && /\/fileUpload\b/i.test(url);
+      } catch (e) {
+        isUpload = false;
+      }
+
+      const result = nativeFetch.apply(this, arguments);
+      if (!isUpload) return result;
+
+      return result.then(
+        (response) => {
+          announceUploadFinished({ status: response.status, ok: response.ok });
+          return response;
+        },
+        (error) => {
+          announceUploadFinished({ status: 0, ok: false });
+          throw error;
+        }
+      );
+    };
+  }
 
   if (HTMLInputElement.prototype.showPicker) {
     const nativeShowPicker = HTMLInputElement.prototype.showPicker;

@@ -3,7 +3,19 @@ const fakeD365 = require('./fake-d365');
 
 // Short timeouts: the fake page responds synchronously, so a step that waits
 // is a step that is genuinely stuck, and the test should say so quickly.
-const FAST = { stepDelay: 10, elementTimeout: 800, uploadTimeout: 2000, lookupSettleMs: 20 };
+//
+// uploadSignalTimeout matters most here. The fake makes no /fileUpload
+// request, so no completion event ever arrives -- exactly the situation that
+// stalled real batches part-way through. With the wait bounded, the run
+// carries on; with it unbounded, this suite hangs, which is the point.
+const FAST = {
+  stepDelay: 10,
+  elementTimeout: 800,
+  uploadTimeout: 2000,
+  uploadSignalTimeout: 150,
+  itemTimeout: 30000,
+  lookupSettleMs: 20
+};
 
 function setup(options = {}) {
   const page = createPage();
@@ -116,7 +128,20 @@ test('commits the chosen sheet through the lookup, not as typed text', async () 
   const result = await queue.run(await bindings(page), FAST);
 
   equal(result.uploaded, 1, `run summary was ${JSON.stringify(result)}`);
-  equal(d365.uploads()[0].sheet, 'DataSheet1');
+  // Committed in the driver's own form. The bare name matches nothing in
+  // D365's list, which is why the sheet step used to stall here.
+  equal(d365.uploads()[0].sheet, 'DataSheet1$');
+});
+
+test('adds the ODBC $ marker to a sheet name that lacks one', () => {
+  const { sheetLookupText } = createPage().D365IA.queue;
+  equal(sheetLookupText('en_us'), 'en_us$');
+  equal(sheetLookupText('DataSheet1'), 'DataSheet1$');
+});
+
+test('does not double up a $ the sheet name already has', () => {
+  const { sheetLookupText } = createPage().D365IA.queue;
+  equal(sheetLookupText('en_us$'), 'en_us$');
 });
 
 test('leaves a single-sheet workbook alone', async () => {
@@ -234,4 +259,106 @@ test('reports D365 message bar text when a step fails', async () => {
   await queue.run(await bindings(page), FAST);
   const item = queue.getItems()[0];
   assert(item.error && item.error.length > 0, 'a failure must carry an explanation');
+});
+
+// The reported regression: a batch that "stops the actions after 2 files".
+// The cause was a wait for an upload-completion signal that never arrives in
+// some environments, timing out per file, plus a run loop that could die and
+// leave the queue permanently busy.
+test('runs a batch of six without stalling part-way', async () => {
+  const { page, d365, queue } = setup({
+    entities: ['Sites V2', 'Vendors V2', 'Customers V3', 'Products V2', 'Terms V1', 'Groups V1']
+  });
+  queue.addFiles(
+    [
+      file(page, '01_Sites_V2.xlsx'),
+      file(page, '02_Vendors_V2.xlsx'),
+      file(page, '03_Customers_V3.xlsx'),
+      file(page, '04_Products_V2.xlsx'),
+      file(page, '05_Terms_V1.xlsx'),
+      file(page, '06_Groups_V1.xlsx')
+    ],
+    {}
+  );
+
+  const result = await queue.run(await bindings(page), FAST);
+
+  equal(result.uploaded, 6, `run summary was ${JSON.stringify(result)}`);
+  equal(result.aborted, null);
+  equal(d365.uploads().length, 6);
+});
+
+// The page never sends the upload signal here, so the first file establishes
+// that and the rest must not each pay the timeout again. Across a 37-file
+// batch that difference is the better part of an afternoon.
+test('stops waiting for the upload signal once it proves absent', async () => {
+  const { page, queue } = setup({ entities: ['Sites V2', 'Vendors V2', 'Customers V3'] });
+
+  const waits = [];
+  const { domUtils } = page.D365IA;
+  const realWait = domUtils.waitForUploadResponse;
+  domUtils.waitForUploadResponse = function (timeout, ownerDocument) {
+    waits.push(timeout);
+    return realWait.call(this, timeout, ownerDocument);
+  };
+
+  queue.addFiles(
+    [
+      file(page, '01_Sites_V2.xlsx'),
+      file(page, '02_Vendors_V2.xlsx'),
+      file(page, '03_Customers_V3.xlsx')
+    ],
+    {}
+  );
+
+  const result = await queue.run(await bindings(page), FAST);
+
+  equal(result.uploaded, 3, `run summary was ${JSON.stringify(result)}`);
+  // The first file waits; once the signal is known to be absent, the rest
+  // skip the wait entirely (a zero timeout is never even armed).
+  equal(waits[0], FAST.uploadSignalTimeout, 'the first file should wait for the signal');
+  equal(
+    waits.slice(1),
+    [],
+    'later files must not wait again for a signal already known to be absent'
+  );
+});
+
+// A render error used to be able to reach back through the status callback
+// and end the batch.
+test('a failing panel render does not stop the run', async () => {
+  // The queue logs the render failure; that is the intended behaviour, so
+  // keep it out of the test output.
+  const realError = console.error;
+  console.error = () => {};
+  const page = createPage();
+  const d365 = fakeD365.install(page.window, { entities: ['Sites V2', 'Vendors V2'] });
+  const queue = page.D365IA.queue.createQueue({
+    onStatusChange: () => {
+      throw new Error('render blew up');
+    }
+  });
+  queue.addFiles([file(page, '01_Sites_V2.xlsx'), file(page, '02_Vendors_V2.xlsx')], {});
+
+  const result = await queue.run(await bindings(page), FAST);
+  console.error = realError;
+
+  equal(result.uploaded, 2, `run summary was ${JSON.stringify(result)}`);
+  equal(d365.uploads().length, 2);
+});
+
+// If a run ends badly, the queue has to be usable again — it used to stay
+// flagged as running, so every later Upload press silently did nothing.
+test('the queue accepts a new run after the previous one ends', async () => {
+  const { page, d365, queue } = setup({ entities: ['Vendors V2'] });
+
+  queue.addFiles([file(page, '01_Unknown_Entity.xlsx')], {});
+  await queue.run(await bindings(page), FAST);
+  assert(queue.isRunning() === false, 'queue stayed flagged as running');
+
+  queue.addFiles([file(page, '02_Vendors_V2.xlsx')], {});
+  const result = await queue.run(await bindings(page), FAST);
+
+  equal(result.uploaded, 1, `run summary was ${JSON.stringify(result)}`);
+  equal(d365.uploads().map((u) => u.fileName), ['02_Vendors_V2.xlsx']);
 });

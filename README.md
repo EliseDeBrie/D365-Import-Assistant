@@ -27,6 +27,12 @@ from the cleaned-up file name, then attaches the file — no typing per file.
    holding `xl/workbook.xml`). Anything with more than one sheet gets a sheet
    picker on its row, defaulting to the first sheet — that's what D365 will
    be told to import.
+
+   The picker shows plain sheet names, but D365 reaches Excel through the
+   ODBC driver, which names every worksheet `Sheet$`. That trailing `$` is
+   what separates the whole sheet from a named range over part of it, and
+   D365's sheet lookup will not accept a name without it. The extension adds
+   it when driving the lookup, so you never have to.
 3. For each file, the file name is cleaned up (leading/trailing sequence
    numbers, dates/timestamps, and `_`/`-` separators are stripped — see
    *Cleaning rules* below) to produce a guessed entity name, and the source
@@ -35,8 +41,11 @@ from the cleaned-up file name, then attaches the file — no typing per file.
    A data package is handled differently throughout — it carries its own
    manifest, so D365 asks it for neither an entity name nor a sheet, and the
    extension skips both steps for it.
-4. Click **Start**. For each queued file, the extension replays D365's own
-   click sequence:
+4. Click **Upload** (or **Upload + Import**). For each queued file, the
+   extension replays D365's own click sequence as a named pipeline —
+   `add-file`, `source-format`, `entity-name`, `attach-file`, `sheet`,
+   `upload`, `panel-reset` — where every step verifies its own outcome, so a
+   failure names the step that actually failed and quotes D365's message bar:
    - clicks **Add file** — but only if that panel isn't already open, since
      clicking it again would close it. From the second file onward the panel
      stays open, so this step is skipped,
@@ -50,10 +59,35 @@ from the cleaned-up file name, then attaches the file — no typing per file.
    - waits for a new row to appear in the entities grid (if that's bound),
      then for the panel to reset, before moving to the next file.
 5. If no suggestion is a confident match, that file is marked
-   **needs-review** and the queue pauses — pick the right entity from a
-   dropdown (built from D365's own suggestions) or skip the file. Nothing is
-   ever typed in blind without going through D365's real autocomplete, so a
-   bad guess can't silently attach the wrong entity.
+   **needs-review** — pick the right entity from a dropdown (built from
+   D365's own suggestions) or skip it. Nothing is ever typed in blind without
+   going through D365's real autocomplete, so a bad guess can't silently
+   attach the wrong entity.
+
+   The rest of the batch keeps going regardless. One file that fails or needs
+   a decision never strands the other 36; each row carries its own status and
+   Retry/Skip buttons, and the run ends with a count of what happened.
+
+### Why a batch can't stall part-way
+
+Three separate guards, because a 37-file run that quietly stops after two is
+worse than one that fails loudly:
+
+- **Nothing waits without a deadline.** The completion signal from
+  `page-hook.js` is corroboration, not a gate — it can legitimately never
+  arrive (the request went through `fetch` rather than XHR, or ran in a
+  cross-origin frame), so it gets a short window of its own rather than the
+  multi-minute budget meant for the Excel driver. If the first file shows the
+  signal isn't reaching us in this environment, later files skip that wait
+  entirely instead of each paying it again.
+- **The run loop can't die.** Anything thrown outside a step's own handling
+  is caught, recorded against the file it happened on, and the queue is
+  released. It used to escape and leave the queue flagged as running, so
+  every later press of Upload returned immediately and did nothing — the
+  batch looked permanently stopped until the page was reloaded.
+- **A per-file watchdog.** Deliberately generous (past even the slowest
+  legitimate upload), it exists only so a file that somehow makes no progress
+  is failed and stepped over rather than hanging the batch.
 
 ## Two run buttons
 
@@ -71,9 +105,15 @@ a file skipped never triggers an import — and needs `runImportButton` bound
 
 ## One-time setup: bind fields
 
-D365's DOM differs by version, environment and customization, so instead of
-hardcoding CSS selectors that could silently break, the extension asks you to
-point at the real elements once. The setup list is in the same order as the
+**You normally don't need to do this.** The extension ships working selectors
+for every field, built on D365's own `data-dyn-controlname` attributes, which
+are stable across sessions and rebuilds. Binding is an *override* for an
+environment where a shipped default doesn't resolve — Setup fields shows which
+rows are running on a default and which on your own binding, and clearing a
+binding falls back to the default rather than leaving the row unusable.
+
+Bindings are stored per environment host, so a dev tenant and production can
+differ. If you do need to bind, the setup list is in the same order as the
 real click sequence:
 
 1. Open the Data management → Import screen you use.

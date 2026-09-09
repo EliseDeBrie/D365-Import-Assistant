@@ -86,6 +86,10 @@
   // below poll for the value to settle rather than assuming a fixed delay.
   async function selectByKeyboard(el, desiredText, { settleMs = 400 } = {}) {
     const inputEl = typeIntoField(el, desiredText);
+    // How long to leave between keystrokes and between polls. Derived from
+    // settleMs so the whole interaction scales together: the shipped default
+    // keeps the 120ms that D365 needs, while tests can drive it much faster.
+    const tick = Math.max(20, Math.min(120, Math.round(settleMs / 3)));
 
     // Give the lookup time to open and filter, but stop early once the
     // control has clearly reacted.
@@ -94,7 +98,7 @@
     );
 
     pressKey(inputEl, { key: 'ArrowDown' });
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, tick));
     pressKey(inputEl, { key: 'Enter' });
     fireEvent(inputEl, 'change');
 
@@ -103,7 +107,7 @@
     let previous = fieldText(inputEl);
     let stableFor = 0;
     while (stableFor < 2) {
-      await new Promise((r) => setTimeout(r, 120));
+      await new Promise((r) => setTimeout(r, tick));
       const current = fieldText(inputEl);
       stableFor = current === previous ? stableFor + 1 : 0;
       previous = current;
@@ -121,27 +125,55 @@
     // focusout is the bubbling half of losing focus, and the one D365's
     // control framework binds on the wrapper rather than the input.
     fireEvent(inputEl, 'focusout');
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, tick));
 
     return fieldText(inputEl);
   }
 
   // Resolves when D365 reports its /fileUpload POST finished (see
   // page-hook.js), or null if nothing arrives in time.
-  function waitForUploadResponse(timeout) {
+  //
+  // This is a corroborating signal, never a gate. The event is dispatched by
+  // the page-world hook in whichever frame ran the upload, and can legitimately
+  // never arrive -- the request may go through fetch() rather than XHR, or the
+  // frame may be cross-origin and carry no hook at all. So it listens in the
+  // upload's own frame as well as the top one, and the caller must treat a
+  // null as "no information", not as failure. Waiting minutes on a signal that
+  // may not be coming is what stalled a batch part-way through.
+  function waitForUploadResponse(timeout, ownerDocument) {
+    const views = [window];
+    const view = ownerDocument && ownerDocument.defaultView;
+    if (view && view !== window) views.push(view);
+
     return new Promise((resolve) => {
+      function cleanup() {
+        views.forEach((v) => {
+          try {
+            v.removeEventListener('d365ia:file-upload-finished', onFinished);
+          } catch (e) {
+            // Frame went away mid-upload; nothing to detach.
+          }
+        });
+      }
+
       const timer = setTimeout(() => {
-        window.removeEventListener('d365ia:file-upload-finished', onFinished);
+        cleanup();
         resolve(null);
       }, timeout);
 
       function onFinished(event) {
         clearTimeout(timer);
-        window.removeEventListener('d365ia:file-upload-finished', onFinished);
+        cleanup();
         resolve((event && event.detail) || { ok: true });
       }
 
-      window.addEventListener('d365ia:file-upload-finished', onFinished);
+      views.forEach((v) => {
+        try {
+          v.addEventListener('d365ia:file-upload-finished', onFinished);
+        } catch (e) {
+          // Cross-origin frame -- unreachable, and the top listener stands.
+        }
+      });
     });
   }
 
