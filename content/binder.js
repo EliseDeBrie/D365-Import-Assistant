@@ -1,14 +1,10 @@
 (function () {
   const D365IA = (window.D365IA = window.D365IA || {});
 
-  // Roles the extension needs bound to real elements on the D365 page.
-  // These are picked once by the user (click-to-bind) because D365's DOM
-  // varies by version/customization and can't be safely hardcoded.
-  //
-  // Matches the real Import screen flow: click Add file -> pick a Source
-  // data format -> (for Excel/CSV) type an Entity name and pick a
-  // suggestion -> attach the file -> click Upload -> a new row appears in
-  // the entities grid once it succeeds.
+  // Roles the extension drives on the D365 page, in the order the Import
+  // screen uses them: Add file -> Source data format -> (Excel/CSV only)
+  // Entity name -> attach the file -> Upload -> a row appears in the
+  // entities grid.
   const ROLES = [
     'addFileButton',
     'sourceFormatField',
@@ -23,6 +19,32 @@
     'closePanelButton',
     'runImportButton'
   ];
+
+  // D365 names its controls with data-dyn-controlname, which is stable
+  // across sessions and rebuilds (unlike the generated element ids), so the
+  // tool ships working selectors and click-to-bind is only needed when a
+  // default doesn't resolve in a particular environment.
+  //
+  // The three list roles are deliberately absent: values are selected by
+  // keyboard (type, arrow down, enter), so no dropdown row has to be
+  // located in the DOM. They remain bindable as a fallback.
+  const DEFAULT_SELECTORS = {
+    addFileButton: '[data-dyn-controlname="AddFile"]',
+    sourceFormatField: '[data-dyn-controlname="SourceNameControl"] input, [id$="_SourceNameControl_input"]',
+    entityNameField: '[data-dyn-controlname="NewEntityNameControl"] input, [id$="_NewEntityNameControl_input"]',
+    // The upload control holds two inputs: the box showing the file name and
+    // the hidden <input type="file"> the browse button drives. Both match a
+    // bare "... input", and since queryVisible takes the last visible match
+    // (file inputs always count as visible), the file input would win and the
+    // "did D365 accept the file?" check would read an empty value forever.
+    fileTarget:
+      '[data-dyn-controlname="NewFileUploadControlFileNameDisplay"] input:not([type="file"]), [id$="_NewFileUploadControlFileNameDisplay_input"]',
+    uploadButton: '[data-dyn-controlname="NewFileUploadControlBrowseButton"]',
+    sheetSelectField:
+      '[data-dyn-controlname="NewSheetLookupControl"] input, [id$="_NewSheetLookupControl_input"]',
+    closePanelButton: '[data-dyn-controlname="OkButton"]',
+    runImportButton: '[data-dyn-controlname="ImportAsync"]'
+  };
 
   // Roles that identify one item in a repeating list rather than a single
   // unique element — these need a selector that generalizes across
@@ -166,13 +188,37 @@
     return migrated;
   }
 
-  async function getBindings() {
-    const data = await chrome.storage.sync.get('bindings');
-    const bindings = data.bindings || {};
-    let changed = false;
+  function currentHost() {
+    return location.hostname || 'default';
+  }
 
-    Object.keys(bindings).forEach((role) => {
-      const binding = bindings[role];
+  // Selectors are environment-specific (a dev tenant can differ from prod),
+  // so they're stored per host. Anything saved by an older version sat in a
+  // single flat map — move it under the host it was captured on.
+  function migrateStore(store) {
+    const roleKeys = Object.keys(store).filter((key) => ROLES.includes(key));
+    if (roleKeys.length === 0) return { store, changed: false };
+
+    const host = currentHost();
+    const hostBindings = Object.assign({}, store[host]);
+    roleKeys.forEach((role) => {
+      if (!hostBindings[role]) hostBindings[role] = store[role];
+      delete store[role];
+    });
+    store[host] = hostBindings;
+    return { store, changed: true };
+  }
+
+  async function readStore() {
+    const data = await chrome.storage.sync.get('bindings');
+    const { store, changed: migratedShape } = migrateStore(data.bindings || {});
+
+    const host = currentHost();
+    const hostBindings = store[host] || {};
+    let changed = migratedShape;
+
+    Object.keys(hostBindings).forEach((role) => {
+      const binding = hostBindings[role];
       if (!binding || !binding.selector) return;
       const migrated = migrateSelector(binding.selector);
       if (migrated !== binding.selector) {
@@ -181,31 +227,60 @@
       }
     });
 
-    if (changed) await chrome.storage.sync.set({ bindings });
-    return bindings;
+    store[host] = hostBindings;
+    if (changed) await chrome.storage.sync.set({ bindings: store });
+    return store;
+  }
+
+  // What the automation actually uses: shipped defaults, with any binding
+  // saved for this environment taking precedence. `source` lets the setup
+  // dialog show which is which.
+  async function getBindings() {
+    const store = await readStore();
+    const custom = store[currentHost()] || {};
+    const effective = {};
+
+    ROLES.forEach((role) => {
+      if (custom[role] && custom[role].selector) {
+        effective[role] = Object.assign({}, custom[role], { source: 'custom' });
+      } else if (DEFAULT_SELECTORS[role]) {
+        effective[role] = { selector: DEFAULT_SELECTORS[role], source: 'default' };
+      }
+    });
+    return effective;
   }
 
   async function saveBinding(role, selector, meta) {
-    const bindings = await getBindings();
-    bindings[role] = Object.assign({ selector }, meta || {});
-    await chrome.storage.sync.set({ bindings });
-    return bindings;
+    const store = await readStore();
+    const host = currentHost();
+    store[host] = Object.assign({}, store[host], {
+      [role]: Object.assign({ selector }, meta || {})
+    });
+    await chrome.storage.sync.set({ bindings: store });
+    return getBindings();
   }
 
+  // Clearing a custom binding falls back to the shipped default rather than
+  // leaving the role unusable.
   async function clearBinding(role) {
-    const bindings = await getBindings();
-    delete bindings[role];
-    await chrome.storage.sync.set({ bindings });
-    return bindings;
+    const store = await readStore();
+    const host = currentHost();
+    const hostBindings = Object.assign({}, store[host]);
+    delete hostBindings[role];
+    store[host] = hostBindings;
+    await chrome.storage.sync.set({ bindings: store });
+    return getBindings();
   }
 
   D365IA.binder = {
     ROLES,
     LIST_ROLES,
+    DEFAULT_SELECTORS,
     startPicking,
     stopPicking,
     getBindings,
     saveBinding,
-    clearBinding
+    clearBinding,
+    currentHost
   };
 })();

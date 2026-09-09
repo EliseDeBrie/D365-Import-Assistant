@@ -1,0 +1,12 @@
+{
+  "name": "d365-data-management-helper-tool",
+  "version": "1.9.0",
+  "private": true,
+  "description": "Edge/Chromium extension that fills in D365 F&O data entity imports from dropped files.",
+  "scripts": {
+    "test": "node test/run.js"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

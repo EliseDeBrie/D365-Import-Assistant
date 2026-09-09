@@ -7,6 +7,12 @@ const CLEANING_FIELDS = [
   'titleCase'
 ];
 
+const DEFAULT_UI = {
+  showLauncher: true,
+  restrictToPages: true,
+  urlPatterns: 'mi=DM_DataManagementWorkspaceMenuItem'
+};
+
 async function load() {
   const data = await chrome.storage.sync.get(['settings', 'bindings']);
   const settings = data.settings || {};
@@ -15,6 +21,11 @@ async function load() {
     { matchThreshold: 0.75, stepDelay: 700, elementTimeout: 5000, uploadTimeout: 300000 },
     settings.options || {}
   );
+  const ui = Object.assign({}, DEFAULT_UI, settings.ui || {});
+
+  document.getElementById('showLauncher').checked = !!ui.showLauncher;
+  document.getElementById('restrictToPages').checked = !!ui.restrictToPages;
+  document.getElementById('urlPatterns').value = ui.urlPatterns;
 
   CLEANING_FIELDS.forEach((f) => {
     document.getElementById(f).checked = !!rules[f];
@@ -70,7 +81,13 @@ document.getElementById('save').addEventListener('click', async () => {
     uploadTimeout: parseInt(document.getElementById('uploadTimeout').value, 10) || 300000
   };
 
-  await chrome.storage.sync.set({ settings: { rules: currentRules(), options } });
+  const ui = {
+    showLauncher: document.getElementById('showLauncher').checked,
+    restrictToPages: document.getElementById('restrictToPages').checked,
+    urlPatterns: document.getElementById('urlPatterns').value
+  };
+
+  await chrome.storage.sync.set({ settings: { rules: currentRules(), options, ui } });
   const status = document.getElementById('saveStatus');
   status.textContent = 'Saved.';
   setTimeout(() => (status.textContent = ''), 1500);

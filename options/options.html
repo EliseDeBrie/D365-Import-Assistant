@@ -8,6 +8,23 @@
     <h1>D365 Import Assistant — Settings</h1>
 
     <section>
+      <h2>Where the button appears</h2>
+      <label><input type="checkbox" id="showLauncher" /> Show the Import Assist button</label>
+      <label
+        ><input type="checkbox" id="restrictToPages" /> Only on Data management pages (recommended)</label
+      >
+      <label
+        >Show only on URLs containing (one per line):
+        <textarea id="urlPatterns" rows="3" spellcheck="false"></textarea>
+      </label>
+      <p class="hint">
+        D365 puts the current form in the URL's <code>mi=</code> parameter, so this keeps the button
+        off every other screen. Leave the list empty (or untick the box above) to show it on all
+        D365 pages. Drag the button itself to move it; its position is remembered.
+      </p>
+    </section>
+
+    <section>
       <h2>Filename cleaning rules</h2>
       <label
         ><input type="checkbox" id="stripLeadingNumbers" /> Strip leading numbers and code prefixes

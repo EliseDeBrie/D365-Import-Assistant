@@ -50,6 +50,36 @@
     return nativeClick.apply(this, arguments);
   };
 
+  // D365 uploads through jquery.fileupload, which POSTs the file to
+  // /fileUpload and only then reports success (FileUpload.js
+  // UploadWasSuccessful). Watching that request finish is a far more direct
+  // completion signal than waiting for a row to appear in the entities grid,
+  // which is rendered asynchronously well afterwards. XHR can only be
+  // observed from the page's own world, which is why this lives here.
+  const nativeOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    try {
+      this.__d365iaIsFileUpload = typeof url === 'string' && /\/fileUpload\b/i.test(url);
+    } catch (e) {
+      this.__d365iaIsFileUpload = false;
+    }
+    return nativeOpen.apply(this, arguments);
+  };
+
+  const nativeSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function () {
+    if (this.__d365iaIsFileUpload) {
+      this.addEventListener('loadend', () => {
+        window.dispatchEvent(
+          new CustomEvent('d365ia:file-upload-finished', {
+            detail: { status: this.status, ok: this.status >= 200 && this.status < 300 }
+          })
+        );
+      });
+    }
+    return nativeSend.apply(this, arguments);
+  };
+
   if (HTMLInputElement.prototype.showPicker) {
     const nativeShowPicker = HTMLInputElement.prototype.showPicker;
     HTMLInputElement.prototype.showPicker = function () {

@@ -9,8 +9,21 @@
   border-radius: 20px;
   padding: 10px 16px;
   font: 13px/1.2 'Segoe UI', sans-serif;
-  cursor: pointer;
+  cursor: grab;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  opacity: 0.85;
+}
+#d365ia-launcher:hover {
+  opacity: 1;
+}
+#d365ia-launcher:active {
+  cursor: grabbing;
+}
+
+/* The id rules above would otherwise out-specify the browser's [hidden]. */
+#d365ia-launcher[hidden],
+#d365ia-panel[hidden] {
+  display: none !important;
 }
 
 #d365ia-panel {
@@ -113,6 +126,30 @@
 .d365ia-entity-none {
   background: #fdecea;
   color: #c62828;
+}
+
+/* Which source data format was detected from the extension — a package
+   follows a different flow from a worksheet, so it has to be visible
+   before the run starts, not after it goes in as the wrong type. */
+.d365ia-item-format {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: #eceff1;
+  color: #455a64;
+  flex-shrink: 0;
+}
+.d365ia-format-package {
+  background: #ede7f6;
+  color: #5e35b1;
+}
+.d365ia-format-csv {
+  background: #e3f2fd;
+  color: #1565c0;
 }
 
 #d365ia-status-bar {

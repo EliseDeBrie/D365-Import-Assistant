@@ -14,8 +14,8 @@
       </div>
       <div id="d365ia-body">
         <div id="d365ia-dropzone">
-          Drag Excel files here<br /><small>or click to browse</small>
-          <input type="file" id="d365ia-file-input" multiple accept=".xlsx,.xls,.xlsm,.csv" style="display:none" />
+          Drag files here<br /><small>Excel, CSV or data package (.zip)</small>
+          <input type="file" id="d365ia-file-input" multiple accept=".xlsx,.xls,.xlsm,.csv,.zip" style="display:none" />
         </div>
         <div id="d365ia-entity-bar">
           <span id="d365ia-entity-status">Entity list: not loaded</span>
@@ -120,56 +120,52 @@
         return;
       }
 
-      // A multi-sheet workbook makes D365 stop and ask which sheet to
-      // import. With nothing bound to answer that, every such file stalls
-      // until it times out, so say so now rather than after the first one.
-      const multiSheet = queue
-        .getItems()
-        .filter((it) => it.status === 'pending' && it.sheetNames && it.sheetNames.length > 1);
-      const sheetBound = bindings.sheetSelectField && bindings.sheetSelectField.selector;
-      if (multiSheet.length > 0 && !sheetBound) {
-        setStatus(
-          `${multiSheet.length} file(s) have multiple sheets, so D365 will ask which sheet to import and nothing can answer it. Bind "Sheet picker" in Setup fields first.`,
-          'warn'
-        );
-        return;
-      }
-
       const settings = await getSettings();
       setStatus('Running...');
-      await queue.run(bindings, settings.options);
-
-      if (queue.isPaused()) {
-        const stuck = queue.getItems().find((it) => it.status === 'needs-review' || it.status === 'error');
-        setStatus(
-          stuck && stuck.status === 'error'
-            ? 'Stopped — a file failed, see the red item below for why.'
-            : 'Paused — an item needs your review below.',
-          'warn'
-        );
-        return;
-      }
-
-      const items = queue.getItems();
-      const allUploaded = items.length > 0 && items.every((it) => it.status === 'filled');
+      const result = await queue.run(bindings, settings.options);
+      const done = describeRun(result);
 
       if (!alsoImport) {
-        setStatus(allUploaded ? 'All files uploaded.' : 'Done.');
+        setStatus(done.text, done.level);
         return;
       }
 
-      // Never start an import over a partial batch.
-      if (!allUploaded) {
-        setStatus('Not every file uploaded — import not started.', 'warn');
+      // Never start an import over a partial batch: importing half a
+      // dependency chain is worse than importing none of it.
+      if (result.uploaded !== result.total) {
+        setStatus(`${done.text} Import not started — fix the files above first.`, 'warn');
         return;
       }
 
       try {
         await queue.finishImport(bindings, settings.options);
-        setStatus('All files uploaded. Import started.');
+        setStatus(`${done.text} Import started.`);
       } catch (e) {
-        setStatus(`Uploaded, but couldn't start the import: ${e.message}`, 'warn');
+        setStatus(`${done.text} Couldn't start the import: ${e.message}`, 'warn');
       }
+    }
+
+    // "Not every file uploaded" told you nothing about which files or why.
+    // Report the actual counts so the reason for stopping is visible without
+    // scrolling the list.
+    function describeRun(s) {
+      if (s.total === 0) return { text: 'Nothing in the queue.', level: 'warn' };
+      if (s.uploaded === s.total) return { text: `All ${s.total} file(s) uploaded.` };
+
+      const parts = [`${s.uploaded} of ${s.total} uploaded`];
+      if (s.failed) parts.push(`${s.failed} failed`);
+      if (s.needsReview) parts.push(`${s.needsReview} awaiting your choice`);
+      if (s.skipped) parts.push(`${s.skipped} skipped`);
+      if (s.pending) parts.push(`${s.pending} still pending`);
+      return { text: `${parts.join(', ')}.`, level: 'warn' };
+    }
+
+    async function rerun() {
+      const bindings = await getBindings();
+      const settings = await getSettings();
+      const result = await queue.run(bindings, settings.options);
+      const done = describeRun(result);
+      setStatus(done.text, done.level);
     }
 
     runBtn.addEventListener('click', () => startRun(false));
@@ -206,8 +202,28 @@
         nameDiv.appendChild(seq);
         nameDiv.appendChild(document.createTextNode(item.rawName));
 
+        // The source data format decides the whole flow (a package has no
+        // entity name and no sheet), so show what was detected before the
+        // run rather than letting a .zip silently go in as Excel.
+        const format = document.createElement('span');
+        format.className = `d365ia-item-format d365ia-format-${item.sourceFormat.toLowerCase()}`;
+        format.textContent = item.sourceFormat;
+        nameDiv.appendChild(format);
+
         const cleanDiv = document.createElement('div');
         cleanDiv.className = 'd365ia-item-clean';
+
+        // A data package carries its own manifest of entities, so D365 never
+        // asks for an entity name — showing a cleaned one would be a lie.
+        if (item.sourceFormat === 'Package') {
+          cleanDiv.textContent = '→ entities come from the package manifest';
+          li.appendChild(nameDiv);
+          li.appendChild(cleanDiv);
+          appendStatus(li, item);
+          list.appendChild(li);
+          return;
+        }
+
         cleanDiv.textContent = `→ ${item.cleanedName}${item.matchedEntity ? ' (' + item.matchedEntity + ')' : ''}`;
 
         const check = D365IA.entityList.validate(item.cleanedName);
@@ -228,10 +244,6 @@
             'D365 itself shows in the Entity name field before assuming this is wrong.';
           cleanDiv.appendChild(badge);
         }
-
-        const statusDiv = document.createElement('div');
-        statusDiv.className = 'd365ia-item-status';
-        statusDiv.textContent = item.status + (item.error ? ': ' + item.error : '');
 
         li.appendChild(nameDiv);
         li.appendChild(cleanDiv);
@@ -260,7 +272,7 @@
           li.appendChild(sheetRow);
         }
 
-        li.appendChild(statusDiv);
+        appendStatus(li, item);
 
         if (item.status === 'needs-review' && item.suggestions && item.suggestions.length) {
           const select = document.createElement('select');
@@ -281,17 +293,8 @@
             queue.resumeAfterReview(item.id, select.value, bindings, settings.options);
           });
 
-          const skipBtn = document.createElement('button');
-          skipBtn.textContent = 'Skip';
-          skipBtn.addEventListener('click', async () => {
-            queue.skip(item.id);
-            const bindings = await getBindings();
-            const settings = await getSettings();
-            queue.run(bindings, settings.options);
-          });
-
           li.appendChild(select);
-          li.appendChild(skipBtn);
+          li.appendChild(skipButton(item));
         }
 
         // An errored item just sits there otherwise — nothing in the UI
@@ -300,28 +303,37 @@
         if (item.status === 'error') {
           const retryBtn = document.createElement('button');
           retryBtn.textContent = 'Retry';
-          retryBtn.addEventListener('click', async () => {
-            queue.updateItem(item.id, { status: 'pending', error: null });
-            const bindings = await getBindings();
-            const settings = await getSettings();
-            queue.run(bindings, settings.options);
-          });
-
-          const skipBtn = document.createElement('button');
-          skipBtn.textContent = 'Skip';
-          skipBtn.addEventListener('click', async () => {
-            queue.skip(item.id);
-            const bindings = await getBindings();
-            const settings = await getSettings();
-            queue.run(bindings, settings.options);
+          retryBtn.addEventListener('click', () => {
+            queue.retry(item.id);
+            rerun();
           });
 
           li.appendChild(retryBtn);
-          li.appendChild(skipBtn);
+          li.appendChild(skipButton(item));
         }
 
         list.appendChild(li);
       });
+    }
+
+    function appendStatus(li, item) {
+      const statusDiv = document.createElement('div');
+      statusDiv.className = 'd365ia-item-status';
+      // The step name is what makes a failure actionable ("attach-file"
+      // versus "entity-name" are entirely different problems).
+      const where = item.step ? ` [${item.step}]` : '';
+      statusDiv.textContent = item.status + where + (item.error ? ': ' + item.error : '');
+      li.appendChild(statusDiv);
+    }
+
+    function skipButton(item) {
+      const btn = document.createElement('button');
+      btn.textContent = 'Skip';
+      btn.addEventListener('click', () => {
+        queue.skip(item.id);
+        rerun();
+      });
+      return btn;
     }
 
     panel.querySelector('#d365ia-minimize').addEventListener('click', () => {

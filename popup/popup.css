@@ -40,5 +40,16 @@ button {
 .hint {
   color: #666;
   font-size: 12px;
-  margin-top: 10px;
+  margin-top: 6px;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+.toggle input {
+  margin: 0;
 }

@@ -54,11 +54,126 @@
   // list, for controls that resolve what you typed on blur.
   function commitField(el) {
     const inputEl = resolveTextInput(el);
-    ['keydown', 'keypress', 'keyup'].forEach((type) =>
-      fireEvent(inputEl, type, { isKeyboard: true, key: 'Enter', code: 'Enter', keyCode: 13 })
-    );
+    pressKey(inputEl, { key: 'Enter', keyCode: 13 });
     fireEvent(inputEl, 'change');
     inputEl.blur();
+  }
+
+  const KEYS = {
+    Enter: 13,
+    ArrowDown: 40,
+    ArrowUp: 38,
+    Escape: 27,
+    Tab: 9
+  };
+
+  function pressKey(el, { key, keyCode }) {
+    const code = keyCode || KEYS[key];
+    ['keydown', 'keypress', 'keyup'].forEach((type) =>
+      fireEvent(el, type, { isKeyboard: true, key, code: key, keyCode: code })
+    );
+  }
+
+  // Picks a value from a D365 lookup the way the keyboard does: type to
+  // filter, arrow down to highlight the first row, Enter to commit.
+  //
+  // This mirrors how the control actually works — D365 opens its lookup from
+  // the input's keyDown handler (Edit.js autoPresentLookup) and renders the
+  // list in a separate popup host, which is exactly why trying to find and
+  // click a row in the DOM was so fragile.
+  //
+  // Committing a value round-trips to the server, so timings vary; the waits
+  // below poll for the value to settle rather than assuming a fixed delay.
+  async function selectByKeyboard(el, desiredText, { settleMs = 400 } = {}) {
+    const inputEl = typeIntoField(el, desiredText);
+
+    // Give the lookup time to open and filter, but stop early once the
+    // control has clearly reacted.
+    await waitFor(() => fieldText(inputEl) !== '', { timeout: settleMs, interval: 80 }).catch(
+      () => null
+    );
+
+    pressKey(inputEl, { key: 'ArrowDown' });
+    await new Promise((r) => setTimeout(r, 120));
+    pressKey(inputEl, { key: 'Enter' });
+    fireEvent(inputEl, 'change');
+
+    // The commit is a server round-trip; wait for the field to stop changing
+    // rather than guessing how long that takes.
+    let previous = fieldText(inputEl);
+    let stableFor = 0;
+    while (stableFor < 2) {
+      await new Promise((r) => setTimeout(r, 120));
+      const current = fieldText(inputEl);
+      stableFor = current === previous ? stableFor + 1 : 0;
+      previous = current;
+    }
+
+    // Typed text is not a value. A D365 lookup only holds what was chosen
+    // from its list; anything merely typed is thrown away the moment the
+    // field loses focus. Reading the field while it still has focus can't
+    // tell the two apart — which is how a sheet name that was only typed,
+    // and an entity name D365 never recognised, both read back as "set" and
+    // then failed later for some unrelated-looking reason. Blurring forces
+    // the control to show what it actually holds.
+    inputEl.blur();
+    fireEvent(inputEl, 'blur');
+    // focusout is the bubbling half of losing focus, and the one D365's
+    // control framework binds on the wrapper rather than the input.
+    fireEvent(inputEl, 'focusout');
+    await new Promise((r) => setTimeout(r, 120));
+
+    return fieldText(inputEl);
+  }
+
+  // Resolves when D365 reports its /fileUpload POST finished (see
+  // page-hook.js), or null if nothing arrives in time.
+  function waitForUploadResponse(timeout) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        window.removeEventListener('d365ia:file-upload-finished', onFinished);
+        resolve(null);
+      }, timeout);
+
+      function onFinished(event) {
+        clearTimeout(timer);
+        window.removeEventListener('d365ia:file-upload-finished', onFinished);
+        resolve((event && event.detail) || { ok: true });
+      }
+
+      window.addEventListener('d365ia:file-upload-finished', onFinished);
+    });
+  }
+
+  // D365 states failures plainly in its own message bar ("Entity not found",
+  // "Excel sheet lookup value is mandatory"). Reading it is far more reliable
+  // than inferring what went wrong from DOM state. Several selectors are
+  // tried because the bar's markup differs across versions.
+  const MESSAGE_SELECTORS = [
+    '[data-dyn-controlname="MessageBar"]',
+    '.messageBar-messageText',
+    '.messageBar-message',
+    '.messageBar',
+    '.sysMessageArea',
+    '[role="alert"]'
+  ];
+
+  function readMessages() {
+    const seen = new Set();
+    MESSAGE_SELECTORS.forEach((selector) => {
+      queryAllVisible(selector).forEach((el) => {
+        const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (text && text.length < 500) seen.add(text);
+      });
+    });
+    return Array.from(seen);
+  }
+
+  // Messages that appeared since a previous snapshot — i.e. what this step
+  // caused, rather than whatever was already on screen.
+  function newMessagesSince(before) {
+    const previous = new Set(before || []);
+    return readMessages().filter((text) => !previous.has(text));
   }
 
   // The text a control currently shows, whether it's an input or a rendered
@@ -259,29 +374,53 @@
     // File inputs are deliberately hidden by the page; they're still usable.
     if (el.tagName === 'INPUT' && el.type === 'file') return true;
     if (el.getClientRects().length === 0) return false;
-    const style = window.getComputedStyle(el);
+    const view = (el.ownerDocument && el.ownerDocument.defaultView) || window;
+    const style = view.getComputedStyle(el);
     return style.visibility !== 'hidden' && style.display !== 'none';
+  }
+
+  // D365 renders parts of its UI inside same-origin iframes, and a content
+  // script's document.querySelector only ever sees its own document. Rather
+  // than injecting a copy of the whole tool into every frame (which
+  // duplicates the panel), search the top document plus any same-origin
+  // iframe documents from one place. Cross-origin frames throw on access and
+  // are skipped.
+  function searchableDocuments() {
+    const docs = [document];
+    const frames = document.querySelectorAll('iframe, frame');
+    frames.forEach((frame) => {
+      try {
+        const doc = frame.contentDocument;
+        if (doc && doc.documentElement) docs.push(doc);
+      } catch (e) {
+        // Cross-origin frame — nothing we can read, and nothing to do.
+      }
+    });
+    return docs;
+  }
+
+  function queryAllAcrossFrames(selector) {
+    const found = [];
+    searchableDocuments().forEach((doc) => {
+      try {
+        found.push(...doc.querySelectorAll(selector));
+      } catch (e) {
+        // Invalid selector — treated as matching nothing.
+      }
+    });
+    return found;
   }
 
   // D365 can leave a torn-down copy of a panel in the DOM behind the live
   // one, so prefer the last visible match rather than the first match.
   function queryVisible(selector) {
-    let all;
-    try {
-      all = Array.from(document.querySelectorAll(selector));
-    } catch (e) {
-      return null;
-    }
+    const all = queryAllAcrossFrames(selector);
     const visible = all.filter(isVisible);
     return visible.length ? visible[visible.length - 1] : null;
   }
 
   function queryAllVisible(selector) {
-    try {
-      return Array.from(document.querySelectorAll(selector)).filter(isVisible);
-    } catch (e) {
-      return [];
-    }
+    return queryAllAcrossFrames(selector).filter(isVisible);
   }
 
   const LIST_ITEM_EXCLUDED_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
@@ -326,25 +465,28 @@
       depth++;
     }
 
-    const all = document.querySelectorAll(SELECTOR);
+    const all = queryAllAcrossFrames(SELECTOR);
     return all.length === 1 ? all[0] : null;
   }
 
   // D365's client framework binds to pointer events, not just mouse events,
-  // so a mousedown/mouseup/click trio alone can be ignored entirely.
+  // so a mousedown/mouseup/click trio alone can be ignored entirely. Events
+  // are constructed from the element's own window so they stay valid when it
+  // lives in an iframe.
   function clickElement(el) {
-    const base = { bubbles: true, cancelable: true, composed: true, view: window, button: 0 };
+    const view = (el.ownerDocument && el.ownerDocument.defaultView) || window;
+    const base = { bubbles: true, cancelable: true, composed: true, view, button: 0 };
     const pointer = Object.assign({ pointerType: 'mouse', isPrimary: true }, base);
 
-    if (window.PointerEvent) {
-      el.dispatchEvent(new PointerEvent('pointerdown', Object.assign({ buttons: 1 }, pointer)));
+    if (view.PointerEvent) {
+      el.dispatchEvent(new view.PointerEvent('pointerdown', Object.assign({ buttons: 1 }, pointer)));
     }
-    el.dispatchEvent(new MouseEvent('mousedown', Object.assign({ buttons: 1 }, base)));
-    if (window.PointerEvent) {
-      el.dispatchEvent(new PointerEvent('pointerup', Object.assign({ buttons: 0 }, pointer)));
+    el.dispatchEvent(new view.MouseEvent('mousedown', Object.assign({ buttons: 1 }, base)));
+    if (view.PointerEvent) {
+      el.dispatchEvent(new view.PointerEvent('pointerup', Object.assign({ buttons: 0 }, pointer)));
     }
-    el.dispatchEvent(new MouseEvent('mouseup', base));
-    el.dispatchEvent(new MouseEvent('click', base));
+    el.dispatchEvent(new view.MouseEvent('mouseup', base));
+    el.dispatchEvent(new view.MouseEvent('click', base));
   }
 
   // Sets a native <select>'s value by matching one of its options' visible
@@ -366,30 +508,41 @@
   // The File itself travels through a hidden input in the shared DOM,
   // because it can't be passed in a cross-world event payload.
   let hookFired = false;
-  window.addEventListener('d365ia:file-hook-fired', () => {
+  function markHookFired() {
     hookFired = true;
-  });
+  }
+  window.addEventListener('d365ia:file-hook-fired', markHookFired);
 
-  function armFileHook(file) {
-    let transfer = document.getElementById('d365ia-file-transfer');
+  // The hook lives in the page world of a specific frame, so both the
+  // transfer input and the arm signal have to land in the frame that owns
+  // the upload control — arming the top window does nothing for an input
+  // inside an iframe.
+  function armFileHook(file, ownerDocument) {
+    const doc = ownerDocument || document;
+    const view = doc.defaultView || window;
+
+    let transfer = doc.getElementById('d365ia-file-transfer');
     if (!transfer) {
-      transfer = document.createElement('input');
+      transfer = doc.createElement('input');
       transfer.type = 'file';
       transfer.id = 'd365ia-file-transfer';
       transfer.style.display = 'none';
-      document.body.appendChild(transfer);
+      doc.body.appendChild(transfer);
     }
-    const dt = new DataTransfer();
+    const dt = new (view.DataTransfer || DataTransfer)();
     dt.items.add(file);
     transfer.files = dt.files;
 
     hookFired = false;
-    window.dispatchEvent(new CustomEvent('d365ia:arm-file-hook'));
+    if (view !== window) view.addEventListener('d365ia:file-hook-fired', markHookFired);
+    view.dispatchEvent(new view.CustomEvent('d365ia:arm-file-hook'));
   }
 
-  function disarmFileHook() {
-    window.dispatchEvent(new CustomEvent('d365ia:disarm-file-hook'));
-    const transfer = document.getElementById('d365ia-file-transfer');
+  function disarmFileHook(ownerDocument) {
+    const doc = ownerDocument || document;
+    const view = doc.defaultView || window;
+    view.dispatchEvent(new view.CustomEvent('d365ia:disarm-file-hook'));
+    const transfer = doc.getElementById('d365ia-file-transfer');
     if (transfer) transfer.value = '';
   }
 
@@ -403,8 +556,14 @@
     typeIntoField,
     commitField,
     fieldText,
+    pressKey,
+    selectByKeyboard,
+    waitForUploadResponse,
+    readMessages,
+    newMessagesSince,
     dropFileOnInput,
     waitFor,
+    searchableDocuments,
     getSelector,
     getGeneralizedListSelector,
     clickElement,

@@ -2,22 +2,42 @@
   const D365IA = (window.D365IA = window.D365IA || {});
   const { domUtils, matcher } = D365IA;
 
-  const CSV_EXTENSION_RE = /\.csv$/i;
+  // D365's Source data format for each kind of file. A data package is a zip
+  // holding its own manifest, so it has no entity name and no sheet to pick —
+  // treating one as Excel (the old behaviour) made those steps fail.
+  const FORMAT_BY_EXTENSION = [
+    { pattern: /\.csv$/i, format: 'CSV' },
+    { pattern: /\.zip$/i, format: 'Package' },
+    { pattern: /\.(xlsx|xlsm|xls)$/i, format: 'Excel' }
+  ];
 
   function sourceFormatFor(fileName) {
-    return CSV_EXTENSION_RE.test(fileName) ? 'CSV' : 'Excel';
+    const match = FORMAT_BY_EXTENSION.find((entry) => entry.pattern.test(fileName));
+    return match ? match.format : 'Excel';
   }
 
   function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
   }
 
-  // Drives the batch through D365's real per-file sequence: Add file ->
-  // Source data format -> Entity name (autocomplete) -> attach file ->
-  // Upload -> wait for a new row in the entities grid. For each file, the
-  // entity name is matched against D365's own suggestion list rather than
-  // typed in blind, and the queue pauses for you to pick manually whenever
-  // that match is ambiguous.
+  function stepError(step, message, messages) {
+    const detail = messages && messages.length ? ` D365 said: "${messages.join(' | ')}"` : '';
+    const error = new Error(`[${step}] ${message}${detail}`);
+    error.step = step;
+    return error;
+  }
+
+  function normalizeText(text) {
+    return String(text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '');
+  }
+
+  // Drives the batch through D365's real per-file sequence as a list of named
+  // steps. Each step verifies its own outcome, so a failure names the step
+  // that actually failed instead of surfacing two steps later as something
+  // unrelated, and D365's own message bar is quoted when it has something to
+  // say.
   function createQueue({ onStatusChange }) {
     let items = [];
     let running = false;
@@ -34,8 +54,9 @@
         rawName: file.name,
         cleanedName: matcher.cleanFileName(file.name, rules),
         sourceFormat: sourceFormatFor(file.name),
-        // pending | matching | needs-review | uploading | filled | error | skipped
+        // pending | running | needs-review | filled | error | skipped
         status: 'pending',
+        step: null,
         matchedEntity: null,
         suggestions: [],
         sheetNames: [],
@@ -49,6 +70,7 @@
       // Sheet names come from reading the workbook itself, which is async —
       // the queue is usable meanwhile and the rows fill in as they resolve.
       newItems.forEach((item) => {
+        if (item.sourceFormat === 'Package') return;
         D365IA.xlsxSheets.readSheetNames(item.file).then((sheetNames) => {
           if (sheetNames.length < 2) return;
           updateItem(item.id, { sheetNames, selectedSheet: sheetNames[0] });
@@ -93,22 +115,34 @@
       emit();
     }
 
-    // Waits for the bound element to show up rather than checking once —
-    // D365 re-renders the row after every click (Add file, picking a
-    // format, etc), so the next element in the sequence often doesn't
-    // exist in the DOM yet at the instant we go looking for it.
-    async function requireBoundEl(bindings, role, options) {
+    function summary() {
+      const count = (status) => items.filter((it) => it.status === status).length;
+      return {
+        total: items.length,
+        uploaded: count('filled'),
+        failed: count('error'),
+        needsReview: count('needs-review'),
+        skipped: count('skipped'),
+        pending: count('pending')
+      };
+    }
+
+    // ---------------------------------------------------------------- DOM
+
+    async function requireBoundEl(bindings, role, options, step) {
       const binding = bindings[role];
       if (!binding || !binding.selector) {
-        throw new Error(`"${role}" isn't bound yet — open Setup fields.`);
+        throw stepError(step, `"${role}" isn't bound and has no built-in default.`);
       }
       try {
         return await domUtils.waitFor(() => domUtils.queryVisible(binding.selector), {
           timeout: (options && options.elementTimeout) || 5000
         });
       } catch (e) {
-        throw new Error(
-          `Bound element for "${role}" didn't show up on the page in time (selector: ${binding.selector}). Re-bind it in Setup fields.`
+        throw stepError(
+          step,
+          `couldn't find "${role}" on the page (selector: ${binding.selector}). Rebind it in Setup fields.`,
+          domUtils.readMessages()
         );
       }
     }
@@ -123,98 +157,189 @@
       return selector ? domUtils.queryListCandidates(selector) : [];
     }
 
-    // Opens the Add file panel, retrying with a native click if D365 ignored
-    // the synthetic event sequence.
-    async function openAddFilePanel(bindings, options) {
-      const addFileEl = await requireBoundEl(bindings, 'addFileButton', options);
-      domUtils.clickElement(addFileEl);
-
-      const opened = await domUtils
-        .waitFor(() => findBoundEl(bindings, 'sourceFormatField'), {
-          timeout: (options && options.elementTimeout) || 5000
-        })
-        .catch(() => null);
-
-      if (!opened && typeof addFileEl.click === 'function') addFileEl.click();
+    function countGridRows(bindings) {
+      const binding = bindings.entitiesGridRow;
+      if (!binding || !binding.selector) return null;
+      return domUtils.queryAllVisible(binding.selector).length;
     }
 
-    // Sets a dropdown to desiredText. Native <select> is set directly;
-    // otherwise it opens the control and clicks the best-matching option if
-    // an option selector is bound, and falls back to typing the value into
-    // the combo box (D365 combos resolve what you type) when it isn't.
-    // Reports whether a real option got clicked (viaOption) — some D365
-    // lookups require a genuine selection and leave typed-only text sitting
-    // in the field as unaccepted, which callers with reliable ground truth
-    // (e.g. sheet names, read directly from the file) should treat as a
-    // real failure rather than silent success.
-    async function pickFromDropdown(fieldEl, optionSelector, desiredText, options) {
+    // Sets a lookup/dropdown to desiredText. Keyboard first (type, arrow
+    // down, enter) because that's how D365's own lookups are designed to be
+    // driven and needs no knowledge of the dropdown's markup; falling back to
+    // clicking a bound option row only if the keyboard path doesn't take.
+    async function setLookupValue(fieldEl, optionSelector, desiredText, options) {
       const selectEl = domUtils.resolveSelect(fieldEl);
-      if (selectEl) {
-        if (!domUtils.selectNativeOption(selectEl, desiredText)) {
-          throw new Error(`No option matching "${desiredText}" in the dropdown.`);
-        }
-        return { value: desiredText, viaOption: true };
+      if (selectEl && domUtils.selectNativeOption(selectEl, desiredText)) {
+        return { value: desiredText, via: 'select' };
       }
 
-      domUtils.clickElement(fieldEl);
+      const afterKeyboard = await domUtils.selectByKeyboard(fieldEl, desiredText, {
+        settleMs: (options && options.lookupSettleMs) || 400
+      });
+      if (normalizeText(afterKeyboard) === normalizeText(desiredText)) {
+        return { value: afterKeyboard, via: 'keyboard' };
+      }
 
       if (optionSelector) {
-        try {
-          await domUtils.waitFor(() => listCandidates(optionSelector).length > 0, {
-            timeout: options.elementTimeout || 5000
-          });
-          const optionEls = listCandidates(optionSelector);
+        const optionEls = listCandidates(optionSelector);
+        if (optionEls.length) {
           const texts = optionEls.map((el) => el.textContent.trim());
           const { candidate, score } = matcher.bestMatch(desiredText, texts);
           if (candidate && score >= 0.5) {
-            // A bare sheet name (from workbook.xml) can match more than one
-            // option equally well — normalizing strips "$", so "en_us" and
-            // the classic Excel/OLEDB whole-sheet range "en_us$" score the
-            // same. Prefer the "$" form among ties: that's what a plain
-            // sheet-name reference actually means in this convention, as
-            // opposed to a same-named table or named range.
+            // A bare sheet name can match both a named range and the
+            // whole-sheet "name$" form; prefer the latter.
             const tied = texts.filter((t) => matcher.scoreMatch(desiredText, t) >= score);
             const preferred = tied.find((t) => t.endsWith('$')) || candidate;
-            const chosenEl = optionEls.find((el) => el.textContent.trim() === preferred);
-            domUtils.clickElement(chosenEl);
-            return { value: preferred, viaOption: true };
+            const chosen = optionEls.find((el) => el.textContent.trim() === preferred);
+            domUtils.clickElement(chosen);
+            await sleep(200);
+            return { value: preferred, via: 'click' };
           }
-        } catch (e) {
-          // Fall through to typing the value instead.
         }
       }
 
-      domUtils.typeIntoField(fieldEl, desiredText);
-      domUtils.commitField(fieldEl);
-      return { value: desiredText, viaOption: false };
+      return { value: domUtils.fieldText(fieldEl), via: 'none' };
     }
 
-    function selectSuggestion(suggestionSelector, candidateText) {
-      const el = listCandidates(suggestionSelector).find(
-        (e) => e.textContent.trim() === candidateText
+    // ---------------------------------------------------------------- steps
+
+    async function openPanel(ctx) {
+      if (findBoundEl(ctx.bindings, 'sourceFormatField')) return;
+
+      const addFileEl = await requireBoundEl(ctx.bindings, 'addFileButton', ctx.options, 'add-file');
+      domUtils.clickElement(addFileEl);
+
+      const opened = await domUtils
+        .waitFor(() => findBoundEl(ctx.bindings, 'sourceFormatField'), {
+          timeout: ctx.options.elementTimeout || 5000
+        })
+        .catch(() => null);
+
+      // D365 sometimes ignores the synthetic sequence; its own click handler
+      // still works.
+      if (!opened && typeof addFileEl.click === 'function') {
+        addFileEl.click();
+        await domUtils
+          .waitFor(() => findBoundEl(ctx.bindings, 'sourceFormatField'), {
+            timeout: ctx.options.elementTimeout || 5000
+          })
+          .catch(() => null);
+      }
+
+      if (!findBoundEl(ctx.bindings, 'sourceFormatField')) {
+        throw stepError('add-file', 'the Add file panel never opened.', domUtils.readMessages());
+      }
+    }
+
+    async function setSourceFormat(ctx) {
+      const fieldEl = await requireBoundEl(
+        ctx.bindings,
+        'sourceFormatField',
+        ctx.options,
+        'source-format'
       );
-      if (!el) return false;
-      domUtils.clickElement(el);
-      return true;
-    }
 
-    // Hands the file to D365 by driving its own upload flow: arm the page
-    // hook, then click the button that would normally open the OS file
-    // picker. The hook answers that picker with the dropped file, so D365
-    // runs its real upload path and no dialog appears. Falls back to
-    // writing straight into a reachable file input if the hook never fires.
-    async function attachFile(bindings, item, options) {
-      let fileTargetEl;
-      try {
-        fileTargetEl = await requireBoundEl(bindings, 'fileTarget', options);
-      } catch (e) {
-        throw new Error(
-          'The upload box never appeared. D365 only shows it once a valid entity name is selected, so check what the Entity name field on the page actually holds.'
+      // The panel keeps the previous file's format, so only touch it when it
+      // actually differs.
+      if (normalizeText(domUtils.fieldText(fieldEl)) === normalizeText(ctx.item.sourceFormat)) {
+        return;
+      }
+
+      const before = domUtils.readMessages();
+      const optionSelector =
+        ctx.bindings.sourceFormatOption && ctx.bindings.sourceFormatOption.selector;
+      await setLookupValue(fieldEl, optionSelector, ctx.item.sourceFormat, ctx.options);
+
+      const current = await domUtils
+        .waitFor(
+          () => {
+            const el = findBoundEl(ctx.bindings, 'sourceFormatField');
+            const text = domUtils.fieldText(el);
+            return normalizeText(text) === normalizeText(ctx.item.sourceFormat) ? text : null;
+          },
+          { timeout: ctx.options.elementTimeout || 5000 }
+        )
+        .catch(() => null);
+
+      if (!current) {
+        throw stepError(
+          'source-format',
+          `couldn't set the format to "${ctx.item.sourceFormat}" (field shows "${domUtils.fieldText(
+            findBoundEl(ctx.bindings, 'sourceFormatField')
+          )}").`,
+          domUtils.newMessagesSince(before)
         );
       }
-      domUtils.armFileHook(item.file);
+    }
 
-      const browseEl = findBoundEl(bindings, 'uploadButton') || fileTargetEl;
+    async function setEntityName(ctx) {
+      // A data package carries its own manifest, so D365 shows no entity
+      // field for it at all.
+      if (ctx.item.sourceFormat === 'Package') return;
+
+      const fieldEl = await requireBoundEl(
+        ctx.bindings,
+        'entityNameField',
+        ctx.options,
+        'entity-name'
+      );
+      const before = domUtils.readMessages();
+
+      const suggestionSelector =
+        ctx.bindings.suggestionItem && ctx.bindings.suggestionItem.selector;
+      const result = await setLookupValue(
+        fieldEl,
+        suggestionSelector,
+        ctx.item.cleanedName,
+        ctx.options
+      );
+
+      const shown = domUtils.fieldText(findBoundEl(ctx.bindings, 'entityNameField'));
+      if (!shown) {
+        throw stepError(
+          'entity-name',
+          `D365 didn't accept "${ctx.item.cleanedName}" as an entity name — the field is empty.`,
+          domUtils.newMessagesSince(before)
+        );
+      }
+
+      // It resolved to something, but not what was asked for: let the user
+      // confirm rather than importing the wrong entity.
+      if (result.via === 'none' || normalizeText(shown) !== normalizeText(ctx.item.cleanedName)) {
+        const suggestions = listCandidates(suggestionSelector).map((el) => el.textContent.trim());
+        ctx.needsReview = {
+          reason: `The entity field shows "${shown}" rather than "${ctx.item.cleanedName}".`,
+          suggestions
+        };
+        return;
+      }
+
+      ctx.update({ matchedEntity: shown });
+    }
+
+    async function attachFile(ctx) {
+      const fileTargetEl = await requireBoundEl(
+        ctx.bindings,
+        'fileTarget',
+        ctx.options,
+        'attach-file'
+      ).catch(() => {
+        throw stepError(
+          'attach-file',
+          'the upload box never appeared. For Excel/CSV, D365 only shows it once a valid entity name is selected.',
+          domUtils.readMessages()
+        );
+      });
+
+      const ownerDocument = fileTargetEl.ownerDocument || document;
+      const before = domUtils.readMessages();
+      domUtils.armFileHook(ctx.item.file, ownerDocument);
+
+      // D365 POSTs the file to /fileUpload; page-hook.js reports when that
+      // finishes, which is the most direct confirmation available.
+      const uploadResponse = domUtils.waitForUploadResponse(ctx.options.uploadTimeout || 300000);
+
+      const browseEl = findBoundEl(ctx.bindings, 'uploadButton') || fileTargetEl;
       domUtils.clickElement(browseEl);
 
       const fired = await domUtils
@@ -224,244 +349,218 @@
       if (!fired) {
         const fileInput = domUtils.resolveFileInput(fileTargetEl);
         if (fileInput) {
-          domUtils.dropFileOnInput(fileInput, item.file);
+          domUtils.dropFileOnInput(fileInput, ctx.item.file);
         } else {
-          domUtils.disarmFileHook();
-          throw new Error(
-            'Couldn\'t hand the file to D365 — no file input was reachable and the Upload button didn\'t ask for one. Bind "Upload button" to the "Upload and add" button in Setup fields.'
+          domUtils.disarmFileHook(ownerDocument);
+          throw stepError(
+            'attach-file',
+            'couldn\'t hand the file to D365 — no file input was reachable and the Upload button didn\'t ask for one.',
+            domUtils.newMessagesSince(before)
           );
         }
       }
 
-      domUtils.disarmFileHook();
+      domUtils.disarmFileHook(ownerDocument);
+
+      // The filename box should now show the file; if it doesn't, the upload
+      // silently didn't take and later steps would fail for the wrong reason.
+      const accepted = await domUtils
+        .waitFor(
+          () => {
+            const text = domUtils.fieldText(findBoundEl(ctx.bindings, 'fileTarget'));
+            return text ? text : null;
+          },
+          { timeout: ctx.options.elementTimeout || 5000 }
+        )
+        .catch(() => null);
+
+      if (!accepted) {
+        throw stepError(
+          'attach-file',
+          'the file was handed over but D365 never showed a file name in the upload box.',
+          domUtils.newMessagesSince(before)
+        );
+      }
+
+      const response = await uploadResponse;
+      if (response && !response.ok) {
+        throw stepError(
+          'attach-file',
+          `D365 rejected the upload (HTTP ${response.status}).`,
+          domUtils.newMessagesSince(before)
+        );
+      }
+      ctx.uploadConfirmed = !!response;
     }
 
-    function countGridRows(bindings) {
-      const binding = bindings.entitiesGridRow;
-      if (!binding || !binding.selector) return null;
-      return document.querySelectorAll(binding.selector).length;
-    }
-
-    // A workbook with more than one sheet makes D365 ask which one to
-    // import. If the sheet control is bound and shows up, set it to the
-    // sheet chosen in the panel; otherwise leave it to the user.
-    //
-    // Unlike the entity name (D365's technical name vs. display label can
-    // legitimately differ), sheet names are read directly out of this same
-    // file, so they're reliable ground truth — D365's own dropdown must
-    // offer that exact text. So a fallback that only typed the value in,
-    // without a real option getting clicked, is treated as a real failure
-    // here rather than best-effort: D365's sheet lookup requires a genuine
-    // selection and otherwise leaves typed text sitting there unaccepted
-    // ("Excel sheet lookup value is mandatory"), which would only surface
-    // minutes later as a grid-row timeout with no link back to the cause.
-    async function applySheetSelection(bindings, item, options) {
-      if (!item.selectedSheet) return;
-      const binding = bindings.sheetSelectField;
-      if (!binding || !binding.selector) return;
+    async function setSheetSelection(ctx) {
+      if (ctx.item.sourceFormat === 'Package') return;
+      if (!ctx.item.selectedSheet) return;
 
       const sheetEl = await domUtils
-        .waitFor(() => domUtils.queryVisible(binding.selector), {
-          timeout: (options && options.elementTimeout) || 5000
+        .waitFor(() => findBoundEl(ctx.bindings, 'sheetSelectField'), {
+          timeout: ctx.options.elementTimeout || 5000
         })
         .catch(() => null);
+
+      // Single-sheet workbooks never prompt, so a missing picker is normal.
       if (!sheetEl) return;
 
-      if (domUtils.fieldText(sheetEl).toLowerCase() === item.selectedSheet.toLowerCase()) return;
+      if (normalizeText(domUtils.fieldText(sheetEl)) === normalizeText(ctx.item.selectedSheet)) {
+        return;
+      }
 
-      const optionSelector = bindings.sheetOption && bindings.sheetOption.selector;
-      const result = await pickFromDropdown(sheetEl, optionSelector, item.selectedSheet, options);
+      const before = domUtils.readMessages();
+      const optionSelector = ctx.bindings.sheetOption && ctx.bindings.sheetOption.selector;
+      await setLookupValue(sheetEl, optionSelector, ctx.item.selectedSheet, ctx.options);
 
-      if (!result.viaOption) {
-        throw new Error(
-          `Typed "${item.selectedSheet}" into the sheet picker, but couldn't click a real option for it — D365's sheet lookup needs a genuine selection, not just typed text, or it stays "mandatory"/unfilled. Bind "one item in that sheet picker's open list" to an actual sheet-name row (open the picker first, then Alt+click a row — not the search/filter box).`
+      // Sheet names are read from this very file, so unlike an entity name
+      // there's no label/technical mismatch to excuse a miss.
+      const settled = await domUtils
+        .waitFor(
+          () => {
+            const text = domUtils.fieldText(findBoundEl(ctx.bindings, 'sheetSelectField'));
+            return normalizeText(text) === normalizeText(ctx.item.selectedSheet) ? text : null;
+          },
+          { timeout: ctx.options.elementTimeout || 5000 }
+        )
+        .catch(() => null);
+
+      if (!settled) {
+        throw stepError(
+          'sheet',
+          `couldn't set the sheet to "${ctx.item.selectedSheet}" — D365's sheet lookup needs a real selection, not just typed text.`,
+          domUtils.newMessagesSince(before)
         );
       }
     }
 
-    // D365 re-renders the Add file panel after an upload and clears the
-    // entity name. Starting the next file mid-render loses whatever is typed,
-    // so wait for the field to come back empty before moving on.
-    async function waitForPanelReset(bindings, options) {
-      const binding = bindings.entityNameField;
+    async function waitForUpload(ctx) {
+      const timeout = ctx.options.uploadTimeout || 300000;
+      if (ctx.baselineGridRows === null) {
+        await sleep(ctx.options.stepDelay || 700);
+        return;
+      }
+
+      try {
+        await domUtils.waitFor(() => countGridRows(ctx.bindings) > ctx.baselineGridRows, {
+          timeout,
+          interval: 500
+        });
+      } catch (e) {
+        throw stepError(
+          'upload',
+          `no new row appeared in the entities grid within ${Math.round(
+            timeout / 1000
+          )}s. D365 warns Excel imports can queue for the Excel driver, so this may just need a longer wait in Settings.`,
+          domUtils.readMessages()
+        );
+      }
+    }
+
+    async function waitForPanelReset(ctx) {
+      const binding = ctx.bindings.entityNameField;
       if (!binding || !binding.selector) return;
+      // D365 clears the panel after an upload; typing into it mid-render
+      // loses the value, so let it settle before the next file.
       await domUtils
         .waitFor(
           () => {
             const el = domUtils.queryVisible(binding.selector);
             return el && !domUtils.fieldText(el);
           },
-          { timeout: (options && options.elementTimeout) || 5000 }
+          { timeout: ctx.options.elementTimeout || 5000 }
         )
         .catch(() => null);
     }
 
-    async function waitForGridRow(bindings, baselineCount, options) {
-      const timeout = (options && options.uploadTimeout) || 300000;
-      try {
-        await domUtils.waitFor(() => countGridRows(bindings) > baselineCount, {
-          timeout,
-          interval: 500
-        });
-      } catch (e) {
-        throw new Error(
-          `The file was handed to D365 but no new row appeared in the entities grid within ${Math.round(
-            timeout / 1000
-          )}s. If this workbook has several sheets, D365 is probably still waiting for a sheet to be picked — bind the sheet picker in Setup fields. Otherwise the upload may just be slow (D365 warns that Excel imports can queue for the Excel driver), so raise "Max wait for a file to finish uploading" in Settings.`
-        );
-      }
-    }
+    const STEPS = [
+      { name: 'add-file', run: openPanel },
+      { name: 'source-format', run: setSourceFormat },
+      { name: 'entity-name', run: setEntityName },
+      { name: 'attach-file', run: attachFile },
+      { name: 'sheet', run: setSheetSelection },
+      { name: 'upload', run: waitForUpload },
+      { name: 'panel-reset', run: waitForPanelReset }
+    ];
 
-    // Types the name and commits it, then reports back what the field
-    // actually holds — D365 can re-render the panel underneath us after the
-    // previous upload and silently discard what was typed.
-    async function typeAndCommit(entityFieldEl, name) {
-      domUtils.typeIntoField(entityFieldEl, name);
-      await sleep(300);
-      domUtils.commitField(entityFieldEl);
-      await sleep(300);
-      return domUtils.fieldText(entityFieldEl);
-    }
+    // ------------------------------------------------------------- running
 
-    // Fills in the Entity name field and resolves it against D365's own
-    // autocomplete. Returns { needsReview: true } if the match isn't
-    // confident enough to proceed unattended.
-    async function matchEntityName(id, item, bindings, options) {
-      const entityFieldEl = await requireBoundEl(bindings, 'entityNameField', options);
-      domUtils.typeIntoField(entityFieldEl, item.cleanedName);
+    async function runSteps(item, bindings, options, fromStep) {
+      const ctx = {
+        item,
+        bindings,
+        options,
+        baselineGridRows: countGridRows(bindings),
+        needsReview: null,
+        update: (patch) => updateItem(item.id, patch)
+      };
 
-      const suggestionSelector = bindings.suggestionItem && bindings.suggestionItem.selector;
-      let suggestions = [];
-      if (suggestionSelector) {
-        try {
-          await domUtils.waitFor(() => listCandidates(suggestionSelector).length > 0, {
-            timeout: options.elementTimeout || 5000
+      const startIndex = fromStep ? STEPS.findIndex((s) => s.name === fromStep) : 0;
+      for (let i = Math.max(0, startIndex); i < STEPS.length; i++) {
+        const step = STEPS[i];
+        updateItem(item.id, { status: 'running', step: step.name });
+        // Steps read the item fresh, since sheet choice can change mid-queue.
+        ctx.item = items.find((it) => it.id === item.id) || item;
+        await step.run(ctx);
+
+        if (ctx.needsReview) {
+          updateItem(item.id, {
+            status: 'needs-review',
+            step: step.name,
+            error: ctx.needsReview.reason,
+            suggestions: ctx.needsReview.suggestions || []
           });
-          suggestions = listCandidates(suggestionSelector).map((el) => el.textContent.trim());
-        } catch (e) {
-          suggestions = [];
+          return { needsReview: true };
         }
       }
 
-      // The environment's own entity list (Load/Refresh in the panel) uses
-      // OData's technical entity names ("OperationalSitesV2"), while D365's
-      // own lookup shows display labels ("Sites V2") — often genuinely
-      // different strings for the same entity, not a sign anything is
-      // wrong. So this is only ever an extra signal when picking among
-      // live suggestions that D365 itself is already offering, never a
-      // reason to reject what D365 has actually put in the field.
-      const validated = D365IA.entityList.validate(item.cleanedName);
-      const trustedName =
-        validated.status === 'match' || !validated.name ? item.cleanedName : validated.name;
-
-      // No usable suggestion list — either unbound, or bound onto something
-      // that isn't a real list of rows (see queryListCandidates). Best
-      // effort: commit what was typed and trust D365 kept it if the field
-      // is non-empty. There's no reliable local signal for "D365 silently
-      // rejected this" short of the field going empty, which is already
-      // handled below.
-      if (suggestions.length === 0) {
-        let text = await typeAndCommit(entityFieldEl, item.cleanedName);
-
-        if (!text) {
-          const retryEl = await requireBoundEl(bindings, 'entityNameField', options);
-          text = await typeAndCommit(retryEl, item.cleanedName);
-        }
-
-        if (!text) {
-          throw new Error(
-            `D365 didn't accept the entity name "${item.cleanedName}" — it may not match an entity in this environment. Set it by hand to check the exact name, or bind "one row in the entity name suggestions" so a match can be picked from the list.`
-          );
-        }
-
-        updateItem(id, { matchedEntity: text });
-        return { needsReview: false };
-      }
-
-      const threshold = options.matchThreshold || 0.75;
-      const direct = matcher.bestMatch(item.cleanedName, suggestions);
-      const trusted = trustedName === item.cleanedName ? direct : matcher.bestMatch(trustedName, suggestions);
-      const best = trusted.score >= direct.score ? trusted : direct;
-
-      if (best.score >= threshold && selectSuggestion(suggestionSelector, best.candidate)) {
-        updateItem(id, { matchedEntity: best.candidate });
-        return { needsReview: false };
-      }
-
-      updateItem(id, { status: 'needs-review', suggestions });
-      paused = true;
-      return { needsReview: true };
+      updateItem(item.id, { status: 'filled', step: null, error: null });
+      return { filled: true };
     }
 
-    // Runs one file through the full Add file -> Source format -> Entity
-    // name -> File -> Upload sequence, then waits for the entities grid to
-    // confirm success (or falls back to a fixed delay if that row isn't
-    // bound). Stops and flags for review if the entity match is ambiguous;
-    // stops and flags an error if anything else goes wrong.
-    async function processItem(id, bindings, options) {
+    // After a failure the Add file panel can be left half-filled, which would
+    // derail the next file too. Closing it makes the next item start clean.
+    async function recoverPanel(bindings, options) {
+      const closeEl = findBoundEl(bindings, 'closePanelButton');
+      if (!closeEl) return;
+      domUtils.clickElement(closeEl);
+      await sleep((options && options.stepDelay) || 700);
+    }
+
+    async function processItem(id, bindings, options, fromStep) {
       const item = items.find((it) => it.id === id);
       if (!item) return null;
-      updateItem(id, { status: 'matching' });
 
       try {
-        const baselineCount = countGridRows(bindings);
-
-        // Clicking "Add file" while its panel is already open closes it
-        // again, so only click when the panel isn't showing.
-        if (!findBoundEl(bindings, 'sourceFormatField')) {
-          await openAddFilePanel(bindings, options);
-        }
-
-        // From the second file on, the panel stays open and keeps the last
-        // format, so only touch the dropdown when it needs changing.
-        const formatFieldEl = await requireBoundEl(bindings, 'sourceFormatField', options);
-        if (domUtils.fieldText(formatFieldEl).toLowerCase() !== item.sourceFormat.toLowerCase()) {
-          const formatOptionSelector =
-            bindings.sourceFormatOption && bindings.sourceFormatOption.selector;
-          await pickFromDropdown(formatFieldEl, formatOptionSelector, item.sourceFormat, options);
-        }
-
-        const matchResult = await matchEntityName(id, item, bindings, options);
-        if (matchResult.needsReview) return { needsReview: true };
-
-        updateItem(id, { status: 'uploading' });
-        await attachFile(bindings, item, options);
-        await applySheetSelection(bindings, item, options);
-
-        if (baselineCount !== null) {
-          await waitForGridRow(bindings, baselineCount, options);
-        } else {
-          await sleep(options.stepDelay || 700);
-        }
-
-        await waitForPanelReset(bindings, options);
-        updateItem(id, { status: 'filled' });
-        return { filled: true };
+        return await runSteps(item, bindings, options, fromStep);
       } catch (err) {
-        updateItem(id, { status: 'error', error: err.message });
-        paused = true;
+        updateItem(id, { status: 'error', error: err.message, step: err.step || null });
         return { error: err.message };
       }
     }
 
+    // One bad file shouldn't strand the other 36: a failure is recorded
+    // against that item and the run moves on, with a summary at the end.
     async function run(bindings, options) {
-      if (running) return;
+      if (running) return summary();
       running = true;
       paused = false;
-      let completedAll = false;
+
       while (!paused) {
         const next = items.find((it) => it.status === 'pending');
-        if (!next) {
-          completedAll = true;
-          break;
-        }
+        if (!next) break;
+
         const result = await processItem(next.id, bindings, options || {});
-        if (!result) break;
+        if (result && (result.error || result.needsReview)) {
+          await recoverPanel(bindings, options);
+        }
         await sleep((options && options.stepDelay) || 700);
       }
+
       running = false;
       emit();
-      return completedAll;
+      return summary();
     }
 
     // Closes the Add file panel and starts D365's import job. Only reached
@@ -474,7 +573,7 @@
         await sleep((options && options.stepDelay) || 700);
       }
 
-      const importEl = await requireBoundEl(bindings, 'runImportButton', options);
+      const importEl = await requireBoundEl(bindings, 'runImportButton', options, 'import');
       domUtils.clickElement(importEl);
     }
 
@@ -482,41 +581,31 @@
       paused = true;
     }
 
-    // Called from the UI once the user manually picks a suggestion for an
-    // item stuck at "needs-review"; finishes that file's remaining steps
-    // (file attach, upload, wait for grid) and resumes the run afterwards.
-    async function resumeAfterReview(id, chosenSuggestionText, bindings, options) {
+    // The user resolved an ambiguous entity name: apply their choice, then
+    // re-enter the same pipeline at the following step rather than repeating
+    // the tail of it here (which is how the sheet step once went missing).
+    async function resumeAfterReview(id, chosenText, bindings, options) {
       const item = items.find((it) => it.id === id);
       if (!item) return;
 
-      try {
-        const suggestionSelector = bindings.suggestionItem && bindings.suggestionItem.selector;
-        if (suggestionSelector) selectSuggestion(suggestionSelector, chosenSuggestionText);
-
-        const baselineCount = countGridRows(bindings);
-        updateItem(id, { status: 'uploading', matchedEntity: chosenSuggestionText });
-        await attachFile(bindings, item, options || {});
-        await applySheetSelection(bindings, item, options || {});
-
-        if (baselineCount !== null) {
-          await waitForGridRow(bindings, baselineCount, options);
-        } else {
-          await sleep((options && options.stepDelay) || 700);
-        }
-
-        updateItem(id, { status: 'filled' });
-      } catch (err) {
-        updateItem(id, { status: 'error', error: err.message });
-        return;
+      const fieldEl = findBoundEl(bindings, 'entityNameField');
+      if (fieldEl) {
+        await domUtils.selectByKeyboard(fieldEl, chosenText, {
+          settleMs: (options && options.lookupSettleMs) || 400
+        });
       }
+      updateItem(id, { matchedEntity: chosenText, error: null, suggestions: [] });
 
-      paused = false;
+      await processItem(id, bindings, options || {}, 'attach-file');
       run(bindings, options);
     }
 
+    function retry(id) {
+      updateItem(id, { status: 'pending', error: null, step: null });
+    }
+
     function skip(id) {
-      updateItem(id, { status: 'skipped' });
-      paused = false;
+      updateItem(id, { status: 'skipped', error: null });
     }
 
     return {
@@ -530,11 +619,13 @@
       finishImport,
       pause,
       resumeAfterReview,
+      retry,
       skip,
+      summary,
       isPaused: () => paused,
       isRunning: () => running
     };
   }
 
-  D365IA.queue = { createQueue };
+  D365IA.queue = { createQueue, sourceFormatFor };
 })();

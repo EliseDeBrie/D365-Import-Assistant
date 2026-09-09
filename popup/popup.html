@@ -6,11 +6,17 @@
   </head>
   <body>
     <h2>D365 Import Assistant</h2>
+
+    <label class="toggle">
+      <input type="checkbox" id="showLauncher" />
+      Show the Import Assist button
+    </label>
+    <p class="hint" id="pageHint"></p>
+
     <div id="status">Checking...</div>
     <button id="open-options">Open settings</button>
     <p class="hint">
-      On a D365 Data management import page, click the floating
-      <strong>Import Assist</strong> button to drag &amp; drop your Excel files.
+      Drag the button to move it. Where it appears is configurable in settings.
     </p>
     <script src="popup.js"></script>
   </body>

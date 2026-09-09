@@ -7,9 +7,13 @@ from the cleaned-up file name, then attaches the file — no typing per file.
 
 ## How it works
 
-1. A floating **Import Assist** button appears on any `*.dynamics.com` page.
-   Click it to open the drop panel.
-2. Drag one or many Excel files anywhere onto the page (the whole page is a
+1. A floating **Import Assist** button appears on the Data management pages
+   only — by default, URLs containing `mi=DM_DataManagementWorkspaceMenuItem`
+   — so it stays out of the way the rest of the time. Drag it anywhere on
+   screen and it stays there; change which pages it appears on, or switch it
+   off entirely, in the options page under *Where the button appears*. Click
+   it to open the drop panel.
+2. Drag one or many files anywhere onto the page (the whole page is a
    drop target, not just the small box — dropping on the launcher button
    works too, and it'll open the panel for you). Or click the panel's box to
    browse instead.
@@ -26,7 +30,11 @@ from the cleaned-up file name, then attaches the file — no typing per file.
 3. For each file, the file name is cleaned up (leading/trailing sequence
    numbers, dates/timestamps, and `_`/`-` separators are stripped — see
    *Cleaning rules* below) to produce a guessed entity name, and the source
-   format is picked from the extension (`.csv` → CSV, otherwise → Excel).
+   format is picked from the extension: `.csv` → **CSV**, `.zip` → **Package**,
+   `.xlsx`/`.xlsm`/`.xls` → **Excel**. Each row shows the format it detected.
+   A data package is handled differently throughout — it carries its own
+   manifest, so D365 asks it for neither an entity name nor a sheet, and the
+   extension skips both steps for it.
 4. Click **Start**. For each queued file, the extension replays D365's own
    click sequence:
    - clicks **Add file** — but only if that panel isn't already open, since
@@ -217,7 +225,36 @@ options/                Settings page (cleaning rules, matching, bindings)
 popup/                  Toolbar popup (status + link to settings)
 styles/dropzone.css     All injected UI styling
 icons/                  Toolbar/extension icons
+test/                   jsdom test suite (see below)
 ```
+
+## Running the tests
+
+```
+npm install
+npm test
+```
+
+The suite runs the real content scripts in [jsdom](https://github.com/jsdom/jsdom)
+against `test/fake-d365.js` — a stand-in for the Import form that copies the
+behaviours that actually caused bugs here:
+
+- the entity name field only exists for Excel/CSV, never for a data package;
+- the upload box only appears once an entity name has been *committed*;
+- the lookups **discard typed text** — a value only sticks if it was chosen
+  from the list, which is what broke the sheet picker;
+- the panel comes back blank after each upload, which is what broke the
+  second file in a batch.
+
+So `npm test` covers a real multi-file run, a `.zip` going in as `Package`,
+sheet selection, upload ordering, and per-file failure recovery, without a
+browser or a D365 tenant. Zip parsing is tested against actual zip bytes
+built in `test/xlsx-sheets.test.js`, including the streaming-mode layout that
+leaves the sizes out of the local header.
+
+jsdom has no layout engine and implements neither `Blob.stream()` nor
+`DataTransfer`; `test/harness.js` stands in for those and says why in each
+case. Nothing in `content/` is stubbed.
 
 ## Notes on how file attachment works
 
