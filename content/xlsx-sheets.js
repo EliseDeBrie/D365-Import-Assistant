@@ -51,12 +51,16 @@
         // The local header repeats these lengths and they can differ from
         // the central directory's, so read them again here. Also read the
         // local compressed size — some generators put the size in the local
-        // header and it may differ from the central directory entry.
+        // header and it may differ from the central directory entry. A zip
+        // written in streaming mode (general-purpose bit 3) legitimately
+        // leaves this at 0, with the real size only in a trailing data
+        // descriptor we don't parse — fall back to the central directory's
+        // size rather than reading a zero-length slice in that case.
         const localNameLength = view.getUint16(localOffset + 26, true);
         const localExtraLength = view.getUint16(localOffset + 28, true);
         const localCompressedSize = view.getUint32(localOffset + 18, true);
         const dataStart = localOffset + 30 + localNameLength + localExtraLength;
-        const data = new Uint8Array(buffer, dataStart, localCompressedSize);
+        const data = new Uint8Array(buffer, dataStart, localCompressedSize || compressedSize);
 
         if (method === STORED) return data;
         if (method === DEFLATE) return inflateRaw(data);
