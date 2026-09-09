@@ -129,6 +129,24 @@ list — if it still gets the same result, the class is being shared with
 something unrelated on the page and the selector needs a manual edit
 (current selectors are visible in Options → Field bindings).
 
+## Checking names against the real entity list
+
+The panel's **Load** button fetches `<your environment>/data` — D365's own
+OData service document, which lists every entity this tenant exposes. It's
+same-origin, so the session already open in the tab authenticates it, and the
+list is right for *this* environment rather than a hardcoded one that drifts
+with version and customizations. It's cached in `chrome.storage.local`
+(thousands of names exceed `storage.sync`'s per-item quota).
+
+Each queued file then shows whether its cleaned name corresponds to a real
+entity, so a bad guess surfaces before a long run rather than partway
+through. Comparison ignores case and spacing, because OData spells an entity
+`CustomerGroups` where the import form labels it `Customer groups`.
+
+This only warns. What gets typed into D365 is still what the queue shows —
+the OData spelling is deliberately not substituted in, since the import
+form's lookup wants the label form.
+
 ## Cleaning rules
 
 Configurable in the extension's **Options** page (right-click the toolbar

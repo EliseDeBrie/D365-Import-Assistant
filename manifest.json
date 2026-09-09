@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "D365 Import Assistant",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Drag and drop Excel files onto a D365 Finance & Operations data entity import screen and auto-fill the entity name from the cleaned-up file name.",
   "icons": {
     "16": "icons/icon16.png",
@@ -47,6 +47,7 @@
         "content/dom-utils.js",
         "content/matcher.js",
         "content/xlsx-sheets.js",
+        "content/entity-list.js",
         "content/binder.js",
         "content/queue.js",
         "content/dropzone.js",

@@ -75,6 +75,46 @@
   color: #0078d4;
 }
 
+#d365ia-entity-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 6px;
+}
+#d365ia-entity-refresh {
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.d365ia-entity-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.d365ia-entity-match {
+  background: #e8f4e8;
+  color: #2e7d32;
+}
+.d365ia-entity-close {
+  background: #fff3e0;
+  color: #b04a00;
+}
+.d365ia-entity-none {
+  background: #fdecea;
+  color: #c62828;
+}
+
 #d365ia-status-bar {
   font-size: 12px;
   min-height: 16px;

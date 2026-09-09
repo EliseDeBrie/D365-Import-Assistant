@@ -17,6 +17,10 @@
           Drag Excel files here<br /><small>or click to browse</small>
           <input type="file" id="d365ia-file-input" multiple accept=".xlsx,.xls,.xlsm,.csv" style="display:none" />
         </div>
+        <div id="d365ia-entity-bar">
+          <span id="d365ia-entity-status">Entity list: not loaded</span>
+          <button id="d365ia-entity-refresh">Load</button>
+        </div>
         <div id="d365ia-status-bar"></div>
         <ul id="d365ia-queue-list"></ul>
         <div id="d365ia-actions">
@@ -35,6 +39,34 @@
     const runBtn = panel.querySelector('#d365ia-run');
     const clearBtn = panel.querySelector('#d365ia-clear');
     const setupBtn = panel.querySelector('#d365ia-setup');
+    const entityStatus = panel.querySelector('#d365ia-entity-status');
+    const entityRefreshBtn = panel.querySelector('#d365ia-entity-refresh');
+
+    function showEntityCount(count) {
+      entityStatus.textContent = count
+        ? `Entity list: ${count.toLocaleString()} entities`
+        : 'Entity list: not loaded';
+      entityRefreshBtn.textContent = count ? 'Refresh' : 'Load';
+    }
+
+    // Pulled from this environment's own OData service document, then used
+    // to flag file names that don't correspond to a real entity before a
+    // long run starts.
+    entityRefreshBtn.addEventListener('click', async () => {
+      entityStatus.textContent = 'Entity list: loading...';
+      try {
+        const { count } = await D365IA.entityList.refresh();
+        showEntityCount(count);
+        render(queue.getItems());
+      } catch (e) {
+        entityStatus.textContent = `Entity list: ${e.message}`;
+      }
+    });
+
+    D365IA.entityList.load().then(({ count }) => {
+      showEntityCount(count);
+      if (count) render(queue.getItems());
+    });
 
     let dragCounter = 0;
 
@@ -121,6 +153,22 @@
         const cleanDiv = document.createElement('div');
         cleanDiv.className = 'd365ia-item-clean';
         cleanDiv.textContent = `→ ${item.cleanedName}${item.matchedEntity ? ' (' + item.matchedEntity + ')' : ''}`;
+
+        const check = D365IA.entityList.validate(item.cleanedName);
+        if (check.status !== 'unknown') {
+          const badge = document.createElement('span');
+          badge.className = `d365ia-entity-badge d365ia-entity-${check.status}`;
+          if (check.status === 'match') {
+            badge.textContent = 'entity found';
+          } else if (check.status === 'close') {
+            badge.textContent = `closest: ${check.name}`;
+          } else {
+            badge.textContent = check.name ? `no match (closest: ${check.name})` : 'no match';
+          }
+          badge.title =
+            'Checked against this environment\'s OData entity list. Names are compared ignoring case and spacing.';
+          cleanDiv.appendChild(badge);
+        }
 
         const statusDiv = document.createElement('div');
         statusDiv.className = 'd365ia-item-status';
