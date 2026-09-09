@@ -19,14 +19,18 @@ from the cleaned-up file name, then attaches the file — no typing per file.
    format is picked from the extension (`.csv` → CSV, otherwise → Excel).
 4. Click **Start**. For each queued file, the extension replays D365's own
    click sequence:
-   - clicks **Add file**,
-   - opens the **Source data format** dropdown and picks Excel/CSV,
-   - types the cleaned name into the **Entity name** field once it appears,
-   - waits for D365's real autocomplete suggestions and picks the
-     best-scoring one,
-   - attaches the Excel file,
-   - clicks **Upload**, then waits for a new row to appear in the entities
-     grid (if that's bound) before moving to the next file.
+   - clicks **Add file** — but only if that panel isn't already open, since
+     clicking it again would close it. From the second file onward the panel
+     stays open, so this step is skipped,
+   - checks the **Source data format** and only opens the dropdown if it
+     needs changing (it keeps the previous file's value),
+   - types the cleaned name into the **Entity name** field, picks D365's
+     best-scoring autocomplete suggestion where one is available, and
+     confirms the field actually kept the value,
+   - attaches the Excel file — the upload box only renders once a valid
+     entity is selected,
+   - waits for a new row to appear in the entities grid (if that's bound),
+     then for the panel to reset, before moving to the next file.
 5. If no suggestion is a confident match, that file is marked
    **needs-review** and the queue pauses — pick the right entity from a
    dropdown (built from D365's own suggestions) or skip the file. Nothing is

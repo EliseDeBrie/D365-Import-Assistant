@@ -170,7 +170,14 @@
     // runs its real upload path and no dialog appears. Falls back to
     // writing straight into a reachable file input if the hook never fires.
     async function attachFile(bindings, item, options) {
-      const fileTargetEl = await requireBoundEl(bindings, 'fileTarget', options);
+      let fileTargetEl;
+      try {
+        fileTargetEl = await requireBoundEl(bindings, 'fileTarget', options);
+      } catch (e) {
+        throw new Error(
+          'The upload box never appeared. D365 only shows it once a valid entity name is selected, so check what the Entity name field on the page actually holds.'
+        );
+      }
       domUtils.armFileHook(item.file);
 
       const browseEl = findBoundEl(bindings, 'uploadButton') || fileTargetEl;
@@ -201,6 +208,23 @@
       return document.querySelectorAll(binding.selector).length;
     }
 
+    // D365 re-renders the Add file panel after an upload and clears the
+    // entity name. Starting the next file mid-render loses whatever is typed,
+    // so wait for the field to come back empty before moving on.
+    async function waitForPanelReset(bindings, options) {
+      const binding = bindings.entityNameField;
+      if (!binding || !binding.selector) return;
+      await domUtils
+        .waitFor(
+          () => {
+            const el = domUtils.queryVisible(binding.selector);
+            return el && !domUtils.fieldText(el);
+          },
+          { timeout: (options && options.elementTimeout) || 5000 }
+        )
+        .catch(() => null);
+    }
+
     async function waitForGridRow(bindings, baselineCount, options) {
       const timeout = (options && options.uploadTimeout) || 60000;
       try {
@@ -215,6 +239,17 @@
           )}s. Check whether the upload actually started, or clear the "entities grid row" binding to skip this check.`
         );
       }
+    }
+
+    // Types the name and commits it, then reports back what the field
+    // actually holds — D365 can re-render the panel underneath us after the
+    // previous upload and silently discard what was typed.
+    async function typeAndCommit(entityFieldEl, name) {
+      domUtils.typeIntoField(entityFieldEl, name);
+      await sleep(300);
+      domUtils.commitField(entityFieldEl);
+      await sleep(300);
+      return domUtils.fieldText(entityFieldEl);
     }
 
     // Fills in the Entity name field and resolves it against D365's own
@@ -237,10 +272,25 @@
         }
       }
 
-      // No suggestion list to pick from — commit what was typed and let D365
-      // validate it rather than leaving the field half-filled.
+      // No suggestion list to pick from — commit what was typed and confirm
+      // D365 kept it. The upload box only renders once a valid entity is
+      // selected, so an empty field here is the real failure, not a missing
+      // upload control later.
       if (suggestions.length === 0) {
-        domUtils.commitField(entityFieldEl);
+        let text = await typeAndCommit(entityFieldEl, item.cleanedName);
+
+        if (!text) {
+          const retryEl = await requireBoundEl(bindings, 'entityNameField', options);
+          text = await typeAndCommit(retryEl, item.cleanedName);
+        }
+
+        if (!text) {
+          throw new Error(
+            `D365 didn't accept the entity name "${item.cleanedName}" — it may not match an entity in this environment. Set it by hand to check the exact name, or bind "one row in the entity name suggestions" so a match can be picked from the list.`
+          );
+        }
+
+        updateItem(id, { matchedEntity: text });
         return { needsReview: false };
       }
 
@@ -274,9 +324,14 @@
           await openAddFilePanel(bindings, options);
         }
 
+        // From the second file on, the panel stays open and keeps the last
+        // format, so only touch the dropdown when it needs changing.
         const formatFieldEl = await requireBoundEl(bindings, 'sourceFormatField', options);
-        const formatOptionSelector = bindings.sourceFormatOption && bindings.sourceFormatOption.selector;
-        await pickFromDropdown(formatFieldEl, formatOptionSelector, item.sourceFormat, options);
+        if (domUtils.fieldText(formatFieldEl).toLowerCase() !== item.sourceFormat.toLowerCase()) {
+          const formatOptionSelector =
+            bindings.sourceFormatOption && bindings.sourceFormatOption.selector;
+          await pickFromDropdown(formatFieldEl, formatOptionSelector, item.sourceFormat, options);
+        }
 
         const matchResult = await matchEntityName(id, item, bindings, options);
         if (matchResult.needsReview) return { needsReview: true };
@@ -290,6 +345,7 @@
           await sleep(options.stepDelay || 700);
         }
 
+        await waitForPanelReset(bindings, options);
         updateItem(id, { status: 'filled' });
         return { filled: true };
       } catch (err) {

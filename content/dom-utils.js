@@ -16,9 +16,19 @@
 
   function fireEvent(element, type, opts) {
     if (opts && opts.isKeyboard) {
-      element.dispatchEvent(
-        new KeyboardEvent(type, { bubbles: true, cancelable: true, key: opts.key || '' })
-      );
+      const event = new KeyboardEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        key: opts.key || '',
+        code: opts.code || opts.key || ''
+      });
+      // keyCode/which are read-only legacy getters that can't be set through
+      // the constructor, and D365's older controls still test them.
+      if (opts.keyCode) {
+        Object.defineProperty(event, 'keyCode', { get: () => opts.keyCode });
+        Object.defineProperty(event, 'which', { get: () => opts.keyCode });
+      }
+      element.dispatchEvent(event);
       return;
     }
     element.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
@@ -44,11 +54,22 @@
   // list, for controls that resolve what you typed on blur.
   function commitField(el) {
     const inputEl = resolveTextInput(el);
-    ['keydown', 'keyup'].forEach((type) =>
-      fireEvent(inputEl, type, { isKeyboard: true, key: 'Enter' })
+    ['keydown', 'keypress', 'keyup'].forEach((type) =>
+      fireEvent(inputEl, type, { isKeyboard: true, key: 'Enter', code: 'Enter', keyCode: 13 })
     );
     fireEvent(inputEl, 'change');
     inputEl.blur();
+  }
+
+  // The text a control currently shows, whether it's an input or a rendered
+  // combo box wrapper.
+  function fieldText(el) {
+    if (!el) return '';
+    const inputEl = resolveTextInput(el);
+    if (inputEl && (inputEl.tagName === 'INPUT' || inputEl.tagName === 'TEXTAREA')) {
+      return (inputEl.value || '').trim();
+    }
+    return (el.textContent || '').trim();
   }
 
   // Attaches a real File object to a native <input type="file">, as if the
@@ -368,6 +389,7 @@
     fireEvent,
     typeIntoField,
     commitField,
+    fieldText,
     dropFileOnInput,
     waitFor,
     getSelector,
