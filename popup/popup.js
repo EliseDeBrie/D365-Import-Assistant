@@ -58,7 +58,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     statusEl.className = 'not-ready';
   }
 
+  await showCurrentEnvironment();
+
   document.getElementById('open-options').addEventListener('click', () => {
     chrome.runtime.openOptionsPage();
   });
 });
+
+// Confirms, right here, that the extension is live on whichever D365
+// environment the active tab happens to be on right now -- no URL to type
+// in, no per-environment setup. host_permissions is a wildcard
+// (*://*.dynamics.com/*), so any sandbox or production tenant, including one
+// created after this extension was installed, works the moment you're on it.
+async function showCurrentEnvironment() {
+  const envEl = document.getElementById('envStatus');
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const host = tab && tab.url && new URL(tab.url).hostname;
+    if (host && /\.dynamics\.com$/i.test(host)) {
+      envEl.textContent = `Active on: ${host}`;
+      envEl.className = 'env-line env-active';
+    } else {
+      envEl.textContent = 'Not on a D365 page in this tab right now.';
+      envEl.className = 'env-line env-inactive';
+    }
+  } catch (e) {
+    // tab.url is only populated when host_permissions covers it, so a
+    // non-dynamics.com tab lands here too -- same message either way.
+    envEl.textContent = 'Not on a D365 page in this tab right now.';
+    envEl.className = 'env-line env-inactive';
+  }
+}

@@ -53,3 +53,19 @@ button {
 .toggle input {
   margin: 0;
 }
+
+.env-line {
+  font-size: 11px;
+  padding: 4px 0;
+  margin-bottom: 8px;
+  color: #666;
+}
+.env-active {
+  color: #2e7d32;
+}
+.env-active::before {
+  content: '● ';
+}
+.env-inactive::before {
+  content: '○ ';
+}

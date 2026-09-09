@@ -1,9 +1,29 @@
 # D365 Import Assistant
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+
 An Edge/Chromium extension for the Dynamics 365 Finance & Operations
 **Data management → Import** screen. Drag a folder of Excel files onto it and
 it auto-fills the D365 "Entity name" field for each one, guessing the entity
 from the cleaned-up file name, then attaches the file — no typing per file.
+
+Licensed under [AGPL-3.0-or-later](LICENSE) — see *License* below for what
+that means in practice. See [`PRIVACY.md`](PRIVACY.md) for exactly what the
+extension can see and where it's stored (short version: nothing leaves your
+browser except calls to your own D365 tenant).
+
+### Works on any D365 environment, automatically
+
+There is no URL to configure, and nothing to change when a sandbox is
+rebuilt or you move to a new tenant. The extension's permissions
+(`host_permissions` in `manifest.json`) are a wildcard —
+`*://*.dynamics.com/*` — so it activates on whichever D365 F&O environment
+you're actually on, the moment you're on it. Bindings and the cached entity
+list are keyed per-hostname automatically (see *Why bindings prefer
+`data-dyn-controlname`* below), so a new environment just gets the shipped
+defaults until you rebind anything for it — no manual setup, no per-tenant
+install. Open the toolbar popup on any D365 page and it shows *Active on:
+\<hostname\>*, confirming it picked up the new environment.
 
 ## How it works
 
@@ -365,3 +385,41 @@ world through a hidden `<input type="file">` in the shared DOM, since a
 If the hook doesn't fire (a D365 version that opens the picker some other
 way), the queue falls back to writing the file straight into a reachable
 `<input type="file">`, and reports a clear error if neither works.
+
+## License
+
+[AGPL-3.0-or-later](LICENSE) — GNU Affero General Public License, version 3
+or later.
+
+In practice, this means:
+
+- **You can use, study, modify, and redistribute this code freely,**
+  including in a commercial setting — install it across your whole
+  organization, fork it, change it to fit your own D365 environment.
+- **If you distribute a modified version — including running it as a
+  hosted/web service — you have to make that version's source available
+  under the same license.** This is what the "A" in AGPL adds over plain
+  GPL: it closes the loophole where someone could take the code, improve
+  it, and offer it as a closed service without ever redistributing the
+  binary. Installing and using it privately, unmodified or modified,
+  never triggers this — only distributing or hosting a modified version
+  does.
+- **There is no warranty.** The license is provided AS IS, per the text in
+  `LICENSE`.
+
+D365Solutions holds the copyright and, as with any AGPL project, remains
+free to offer the same code under different (e.g. commercial) terms to
+anyone who doesn't want the AGPL's conditions — the AGPL only governs how
+*this* copy can be used and redistributed by everyone else. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) if you'd like to submit changes; a pull
+request is accepted under the same license as the rest of the repo, no
+separate agreement needed.
+
+## Privacy
+
+See [`PRIVACY.md`](PRIVACY.md) for exactly what the extension can access
+and where it stores it. Short version: it only runs on `*.dynamics.com`
+pages, nothing it reads or stores ever leaves your browser except a call to
+your own tenant's OData service (for the entity-name hint) and the upload
+D365 itself was already going to do — there's no backend, no analytics, and
+nothing sent to the developer.
