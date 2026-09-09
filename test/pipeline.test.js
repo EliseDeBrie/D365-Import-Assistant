@@ -362,3 +362,55 @@ test('the queue accepts a new run after the previous one ends', async () => {
   equal(result.uploaded, 1, `run summary was ${JSON.stringify(result)}`);
   equal(d365.uploads().map((u) => u.fileName), ['02_Vendors_V2.xlsx']);
 });
+
+// D365 stops and asks when two workbooks in one project share a sheet name,
+// which happens on every file when they all carry an "en_us" sheet. The
+// dialog is modal and defaults to No, so an unanswered one drops the file
+// and stalls everything behind it.
+test('answers the duplicate-sheet-name confirmation and keeps going', async () => {
+  const { page, d365, queue } = setup({
+    entities: ['Sites V2', 'Vendors V2'],
+    sheetsByFile: {
+      '01_Sites_V2.xlsx': ['en_us', 'Data'],
+      '02_Vendors_V2.xlsx': ['en_us', 'Data']
+    }
+  });
+
+  const items = queue.addFiles(
+    [file(page, '01_Sites_V2.xlsx'), file(page, '02_Vendors_V2.xlsx')],
+    {}
+  );
+  items.forEach((it) =>
+    queue.updateItem(it.id, { sheetNames: ['en_us', 'Data'], selectedSheet: 'en_us' })
+  );
+
+  const result = await queue.run(await bindings(page), FAST);
+
+  assert(d365.prompts().includes('sheet-already-mapped'), 'the clash never came up');
+  equal(result.uploaded, 2, `run summary was ${JSON.stringify(result)}`);
+  equal(d365.uploads().map((u) => u.fileName), ['01_Sites_V2.xlsx', '02_Vendors_V2.xlsx']);
+  equal(d365.openDialog(), null, 'the dialog was left on screen');
+});
+
+// Auto-clicking anything on an unrecognised confirmation is how an automation
+// does real damage: these dialogs are also where delete and overwrite live.
+test('leaves an unrecognised dialog alone and reports it', async () => {
+  const { page, d365, queue } = setup({ entities: ['Vendors V2'] });
+  queue.addFiles([file(page, '01_Vendors_V2.xlsx')], {});
+
+  d365.showDialog('Delete all staging data for this project?', [
+    { label: 'Yes' },
+    { label: 'No' }
+  ]);
+
+  const result = await queue.run(await bindings(page), FAST);
+
+  assert(d365.openDialog() !== null, 'an unknown dialog must never be clicked');
+  equal(result.uploaded, 0);
+
+  const item = queue.getItems()[0];
+  assert(
+    item.error && item.error.includes('unanswered dialog'),
+    `the failure should name the dialog blocking it, got: ${item.error}`
+  );
+});

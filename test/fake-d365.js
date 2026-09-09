@@ -19,7 +19,11 @@ function install(window, options = {}) {
     // Entity names this fake tenant knows. A lookup will not commit anything
     // outside this list, exactly like the real one.
     entities: options.entities || ['Inventory Adjustment Journal Names', 'Vendors V2'],
-    formats: options.formats || ['Excel', 'CSV', 'Package', 'XML-Element']
+    formats: options.formats || ['Excel', 'CSV', 'Package', 'XML-Element'],
+    // Sheet names already mapped in this import project, and the prompts
+    // raised as a result.
+    mappedSheets: new Set(),
+    prompts: []
   };
 
   document.body.innerHTML = `
@@ -34,6 +38,43 @@ function install(window, options = {}) {
   const host = document.getElementById('panel-host');
   const addFileBtn = document.querySelector('[data-dyn-controlname="AddFile"]');
   const messageBar = document.querySelector('[data-dyn-controlname="MessageBar"]');
+
+  // D365's modal message box. It blocks the page: while one is up, nothing
+  // else responds, which is what makes an unanswered dialog stall a batch
+  // rather than merely slow it down.
+  let openDialog = null;
+
+  function showDialog(text, buttons) {
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.className = 'dialog-popup';
+
+    const body = document.createElement('div');
+    body.textContent = text;
+    dialog.appendChild(body);
+
+    buttons.forEach(({ label, onPick }) => {
+      const btn = document.createElement('button');
+      btn.setAttribute('data-dyn-controlname', `${label}Button`);
+      btn.textContent = label;
+      btn.addEventListener('click', () => {
+        dialog.remove();
+        openDialog = null;
+        if (onPick) onPick();
+      });
+      dialog.appendChild(btn);
+    });
+
+    document.body.appendChild(dialog);
+    openDialog = dialog;
+    return dialog;
+  }
+
+  // Everything the page does goes through here, so a pending dialog really
+  // does block it.
+  function blocked() {
+    return openDialog !== null;
+  }
 
   function message(text) {
     const line = document.createElement('div');
@@ -154,6 +195,7 @@ function install(window, options = {}) {
     wrap.appendChild(browse);
 
     fileInput.addEventListener('change', () => {
+      if (blocked()) return;
       const file = fileInput.files && fileInput.files[0];
       if (!file) return;
       display.value = file.name;
@@ -170,13 +212,34 @@ function install(window, options = {}) {
         host.appendChild(sheetLookup.wrap);
       }
 
-      state.uploads.push({
-        fileName: file.name,
-        format: sourceLookup ? sourceLookup.getCommitted() : null,
-        entity: entityLookup ? entityLookup.getCommitted() : null,
-        sheet: () => (sheetLookup ? sheetLookup.getCommitted() : null)
-      });
-      message(`Uploaded ${file.name}.`);
+      function recordUpload() {
+        state.uploads.push({
+          fileName: file.name,
+          format: sourceLookup ? sourceLookup.getCommitted() : null,
+          entity: entityLookup ? entityLookup.getCommitted() : null,
+          sheet: () => (sheetLookup ? sheetLookup.getCommitted() : null)
+        });
+        message(`Uploaded ${file.name}.`);
+      }
+
+      // Two workbooks in one project using the same sheet name -- every file
+      // having an "en_us" sheet, say -- makes D365 stop and ask. It defaults
+      // to No, so an unanswered one silently drops the file.
+      const clash = sheets.find((name) => state.mappedSheets.has(name));
+      if (clash) {
+        state.prompts.push('sheet-already-mapped');
+        showDialog(
+          'The sheet with the same name is already mapped in this project. Do you still want to continue?',
+          [
+            { label: 'Yes', onPick: () => { sheets.forEach((n) => state.mappedSheets.add(n)); recordUpload(); } },
+            { label: 'No', onPick: () => message('Upload cancelled.') }
+          ]
+        );
+        return;
+      }
+
+      sheets.forEach((name) => state.mappedSheets.add(name));
+      recordUpload();
     });
 
     host.appendChild(wrap);
@@ -206,7 +269,10 @@ function install(window, options = {}) {
     host.appendChild(ok);
   }
 
-  addFileBtn.addEventListener('click', openPanel);
+  addFileBtn.addEventListener('click', () => {
+    if (blocked()) return;
+    openPanel();
+  });
 
   options.onCommit = (controlName, value) => {
     if (controlName === 'SourceNameControl') onFormatCommitted(value);
@@ -216,6 +282,9 @@ function install(window, options = {}) {
 
   return {
     state,
+    showDialog,
+    prompts: () => state.prompts.slice(),
+    openDialog: () => openDialog,
     openPanel,
     clearPanel,
     message,

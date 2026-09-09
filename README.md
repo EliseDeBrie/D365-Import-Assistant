@@ -68,6 +68,30 @@ from the cleaned-up file name, then attaches the file — no typing per file.
    a decision never strands the other 36; each row carries its own status and
    Retry/Skip buttons, and the run ends with a count of what happened.
 
+### Dialogs D365 raises mid-run
+
+D365 interrupts with modal message boxes, and while one is up nothing else on
+the page responds — so an unanswered dialog doesn't slow a batch down, it
+stops it, and every step behind it times out reporting something that isn't
+the real problem.
+
+While a run is in progress the extension watches for these and answers the
+ones it recognises. Right now that is one:
+
+| Dialog | Answer | Why |
+| --- | --- | --- |
+| *"The sheet with the same name is already mapped in this project. Do you still want to continue?"* | **Yes** | Raised when two workbooks in the project share a sheet name — which is every file when they all carry an `en_us` sheet. Continuing is the point of the batch, and the dialog defaults to **No**. |
+
+**Nothing else is ever clicked.** Auto-answering a confirmation you don't
+recognise is how an automation does real damage — these same dialogs are
+where *delete*, *overwrite* and *publish* live. An unrecognised dialog is
+left exactly as it is, and its text is attached to the failure of whatever
+step stalled behind it, so the panel says *"unanswered dialog: …"* rather
+than something misleading about a missing field.
+
+To teach it another prompt, add an entry to `KNOWN_PROMPTS` in
+`content/queue.js` — a regex for the text and the button label to press.
+
 ### Why a batch can't stall part-way
 
 Three separate guards, because a 37-file run that quietly stops after two is

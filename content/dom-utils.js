@@ -177,6 +177,66 @@
     });
   }
 
+  // D365 interrupts with modal dialogs -- "The sheet with the same name is
+  // already mapped in this project. Do you still want to continue?" is the one
+  // that shows up mid-batch. They are modal, so nothing else on the page
+  // responds until one is answered, and every step behind it just times out
+  // reporting something that isn't the real problem.
+  //
+  // The markup differs across versions, so several shapes are tried.
+  const DIALOG_SELECTORS = [
+    '[role="dialog"]',
+    '[role="alertdialog"]',
+    '.dialog-popup',
+    '.messageBox',
+    '.sysBoxForm',
+    '[data-dyn-controlname="MessageBoxForm"]'
+  ];
+
+  function visibleDialogs() {
+    const seen = new Set();
+    const found = [];
+    DIALOG_SELECTORS.forEach((selector) => {
+      queryAllVisible(selector).forEach((el) => {
+        if (seen.has(el)) return;
+        seen.add(el);
+        found.push(el);
+      });
+    });
+    // A dialog nested inside another matched element would be answered twice.
+    return found.filter((el) => !found.some((other) => other !== el && other.contains(el)));
+  }
+
+  function dialogText(el) {
+    return (el.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  // Finds the button that answers a dialog. D365 names its message-box
+  // buttons through data-dyn-controlname ("YesButton", "OkButton"), but falls
+  // back to plain labels, so both are matched.
+  function findDialogButton(dialog, labels) {
+    const wanted = labels.map((label) => label.toLowerCase());
+    const candidates = Array.from(
+      dialog.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')
+    ).filter(isVisible);
+
+    const byControlName = candidates.find((el) => {
+      const name = (el.getAttribute('data-dyn-controlname') || '').toLowerCase();
+      return wanted.some((label) => name === label || name === `${label}button`);
+    });
+    if (byControlName) return byControlName;
+
+    // Match the label exactly. A substring match would pick "Yes, delete
+    // everything" out of a dialog we never meant to answer.
+    return (
+      candidates.find((el) => {
+        const text = (el.textContent || el.value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const aria = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+        return wanted.includes(text) || wanted.includes(aria);
+      }) || null
+    );
+  }
+
   // D365 states failures plainly in its own message bar ("Entity not found",
   // "Excel sheet lookup value is mandatory"). Reading it is far more reliable
   // than inferring what went wrong from DOM state. Several selectors are
@@ -601,6 +661,9 @@
     clickElement,
     selectNativeOption,
     isVisible,
+    visibleDialogs,
+    dialogText,
+    findDialogButton,
     queryVisible,
     queryAllVisible,
     queryListCandidates,

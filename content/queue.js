@@ -44,6 +44,57 @@
     return name.endsWith('$') ? name : `${name}$`;
   }
 
+  // Modal dialogs D365 raises mid-run, and how to answer them.
+  //
+  // Only prompts listed here are answered. Anything else is left alone and
+  // reported, because clicking an unrecognised confirmation on the user's
+  // behalf is how an automation does real damage -- these dialogs are also
+  // where "delete", "overwrite" and "publish" live.
+  const KNOWN_PROMPTS = [
+    {
+      id: 'sheet-already-mapped',
+      // Raised when two workbooks in one project use the same sheet name
+      // (every file having an "en_us" sheet, say). Continuing is the whole
+      // point of the batch, and the dialog defaults to No.
+      test: /sheet with the same name is already mapped/i,
+      answer: ['Yes'],
+      because: 'two files share a sheet name, which is expected in a batch'
+    }
+  ];
+
+  function matchPrompt(text) {
+    return KNOWN_PROMPTS.find((prompt) => prompt.test.test(text)) || null;
+  }
+
+  // Answers any recognised dialog that is currently up. Returns what it did,
+  // and what it deliberately left alone.
+  function answerKnownPrompts() {
+    const answered = [];
+    const unknown = [];
+
+    domUtils.visibleDialogs().forEach((dialog) => {
+      const text = domUtils.dialogText(dialog);
+      if (!text) return;
+
+      const prompt = matchPrompt(text);
+      if (!prompt) {
+        unknown.push(text.slice(0, 300));
+        return;
+      }
+
+      const button = domUtils.findDialogButton(dialog, prompt.answer);
+      if (!button) {
+        unknown.push(text.slice(0, 300));
+        return;
+      }
+
+      domUtils.clickElement(button);
+      answered.push(prompt.id);
+    });
+
+    return { answered, unknown };
+  }
+
   // Drives the batch through D365's real per-file sequence as a list of named
   // steps. Each step verifies its own outcome, so a failure names the step
   // that actually failed instead of surfacing two steps later as something
@@ -58,6 +109,9 @@
     // a batch never pays the timeout more than once: 20s x 37 files of
     // waiting for a signal that was never coming is most of an afternoon.
     let uploadSignalWorks = null;
+    // Dialogs the watcher saw but would not answer, kept so the step that
+    // stalls behind one can say what is actually on screen.
+    let blockingDialogs = [];
 
     // Notifying the UI must never be able to break the run: a render error
     // reaching back into a step would fail the file it was working on, and
@@ -166,7 +220,7 @@
         throw stepError(
           step,
           `couldn't find "${role}" on the page (selector: ${binding.selector}). Rebind it in Setup fields.`,
-          domUtils.readMessages()
+          withDialogContext(domUtils.readMessages())
         );
       }
     }
@@ -251,7 +305,7 @@
       }
 
       if (!findBoundEl(ctx.bindings, 'sourceFormatField')) {
-        throw stepError('add-file', 'the Add file panel never opened.', domUtils.readMessages());
+        throw stepError('add-file', 'the Add file panel never opened.', withDialogContext(domUtils.readMessages()));
       }
     }
 
@@ -291,7 +345,7 @@
           `couldn't set the format to "${ctx.item.sourceFormat}" (field shows "${domUtils.fieldText(
             findBoundEl(ctx.bindings, 'sourceFormatField')
           )}").`,
-          domUtils.newMessagesSince(before)
+          withDialogContext(domUtils.newMessagesSince(before))
         );
       }
     }
@@ -323,7 +377,7 @@
         throw stepError(
           'entity-name',
           `D365 didn't accept "${ctx.item.cleanedName}" as an entity name — the field is empty.`,
-          domUtils.newMessagesSince(before)
+          withDialogContext(domUtils.newMessagesSince(before))
         );
       }
 
@@ -351,7 +405,7 @@
         throw stepError(
           'attach-file',
           'the upload box never appeared. For Excel/CSV, D365 only shows it once a valid entity name is selected.',
-          domUtils.readMessages()
+          withDialogContext(domUtils.readMessages())
         );
       });
 
@@ -411,7 +465,7 @@
         throw stepError(
           'attach-file',
           'the file was handed over but D365 never showed a file name in the upload box.',
-          domUtils.newMessagesSince(before)
+          withDialogContext(domUtils.newMessagesSince(before))
         );
       }
 
@@ -425,7 +479,7 @@
         throw stepError(
           'attach-file',
           `D365 rejected the upload (HTTP ${response.status}).`,
-          domUtils.newMessagesSince(before)
+          withDialogContext(domUtils.newMessagesSince(before))
         );
       }
       ctx.uploadConfirmed = !!response;
@@ -470,7 +524,7 @@
           `couldn't set the sheet to "${sheetLookupText(
             ctx.item.selectedSheet
           )}" — D365's sheet lookup needs a real selection from its list, not just typed text.`,
-          domUtils.newMessagesSince(before)
+          withDialogContext(domUtils.newMessagesSince(before))
         );
       }
     }
@@ -493,7 +547,7 @@
           `no new row appeared in the entities grid within ${Math.round(
             timeout / 1000
           )}s. D365 warns Excel imports can queue for the Excel driver, so this may just need a longer wait in Settings.`,
-          domUtils.readMessages()
+          withDialogContext(domUtils.readMessages())
         );
       }
     }
@@ -608,6 +662,38 @@
       }
     }
 
+    // A D365 modal blocks the whole page, so it can land during any step and
+    // has to be cleared promptly rather than checked for at fixed points.
+    // The watcher runs only while a run is in progress, and only ever clicks
+    // buttons on prompts in KNOWN_PROMPTS.
+    function startDialogWatcher(options) {
+      const interval = (options && options.dialogPollMs) || 400;
+      blockingDialogs = [];
+
+      const timer = setInterval(() => {
+        try {
+          const { answered, unknown } = answerKnownPrompts();
+          if (answered.length) emit();
+          blockingDialogs = unknown;
+        } catch (e) {
+          // Never let dialog handling break the run it is there to protect.
+          console.error('[D365 Import Assistant] dialog watcher failed', e);
+        }
+      }, interval);
+
+      return () => clearInterval(timer);
+    }
+
+    // Appends whatever unanswered dialog is on screen to a step's failure, so
+    // "the panel never opened" reads as what it really is: something modal is
+    // sitting in front of it waiting for an answer.
+    function withDialogContext(messages) {
+      if (!blockingDialogs.length) return messages;
+      return (messages || []).concat(
+        blockingDialogs.map((text) => `unanswered dialog: "${text}"`)
+      );
+    }
+
     // One bad file shouldn't strand the other 36: a failure is recorded
     // against that item and the run moves on, with a summary at the end.
     //
@@ -622,6 +708,7 @@
       running = true;
       paused = false;
       let aborted = null;
+      const stopDialogWatcher = startDialogWatcher(options);
 
       try {
         while (!paused) {
@@ -646,6 +733,7 @@
           });
         }
       } finally {
+        stopDialogWatcher();
         running = false;
         emit();
       }
@@ -657,14 +745,21 @@
     // from the explicit "Upload + Import" button, never from a plain upload
     // run — this is the step that actually loads data into D365.
     async function finishImport(bindings, options) {
-      const closeEl = findBoundEl(bindings, 'closePanelButton');
-      if (closeEl) {
-        domUtils.clickElement(closeEl);
-        await sleep((options && options.stepDelay) || 700);
-      }
+      // Closing the panel and starting the job can each raise a confirmation.
+      const stopDialogWatcher = startDialogWatcher(options);
+      try {
+        const closeEl = findBoundEl(bindings, 'closePanelButton');
+        if (closeEl) {
+          domUtils.clickElement(closeEl);
+          await sleep((options && options.stepDelay) || 700);
+        }
 
-      const importEl = await requireBoundEl(bindings, 'runImportButton', options, 'import');
-      domUtils.clickElement(importEl);
+        const importEl = await requireBoundEl(bindings, 'runImportButton', options, 'import');
+        domUtils.clickElement(importEl);
+        await sleep((options && options.stepDelay) || 700);
+      } finally {
+        stopDialogWatcher();
+      }
     }
 
     function pause() {
