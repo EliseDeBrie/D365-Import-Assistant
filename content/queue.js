@@ -164,22 +164,57 @@
       return true;
     }
 
-    // The visible "Upload data file" box isn't the input that accepts a
-    // file — the real <input type="file"> is hidden nearby, so bind either
-    // and let this find the usable one.
-    function attachFile(fileTargetEl, file) {
-      const fileInput = domUtils.resolveFileInput(fileTargetEl);
-      if (fileInput) {
-        domUtils.dropFileOnInput(fileInput, file);
-      } else {
-        domUtils.dropFileOnDropTarget(fileTargetEl, file);
+    // Hands the file to D365 by driving its own upload flow: arm the page
+    // hook, then click the button that would normally open the OS file
+    // picker. The hook answers that picker with the dropped file, so D365
+    // runs its real upload path and no dialog appears. Falls back to
+    // writing straight into a reachable file input if the hook never fires.
+    async function attachFile(bindings, item, options) {
+      const fileTargetEl = await requireBoundEl(bindings, 'fileTarget', options);
+      domUtils.armFileHook(item.file);
+
+      const browseEl = findBoundEl(bindings, 'uploadButton') || fileTargetEl;
+      domUtils.clickElement(browseEl);
+
+      const fired = await domUtils
+        .waitFor(() => domUtils.fileHookFired(), { timeout: 2000, interval: 100 })
+        .catch(() => false);
+
+      if (!fired) {
+        const fileInput = domUtils.resolveFileInput(fileTargetEl);
+        if (fileInput) {
+          domUtils.dropFileOnInput(fileInput, item.file);
+        } else {
+          domUtils.disarmFileHook();
+          throw new Error(
+            'Couldn\'t hand the file to D365 — no file input was reachable and the Upload button didn\'t ask for one. Bind "Upload button" to the "Upload and add" button in Setup fields.'
+          );
+        }
       }
+
+      domUtils.disarmFileHook();
     }
 
     function countGridRows(bindings) {
       const binding = bindings.entitiesGridRow;
       if (!binding || !binding.selector) return null;
       return document.querySelectorAll(binding.selector).length;
+    }
+
+    async function waitForGridRow(bindings, baselineCount, options) {
+      const timeout = (options && options.uploadTimeout) || 60000;
+      try {
+        await domUtils.waitFor(() => countGridRows(bindings) > baselineCount, {
+          timeout,
+          interval: 500
+        });
+      } catch (e) {
+        throw new Error(
+          `The file was handed to D365 but no new row appeared in the entities grid within ${Math.round(
+            timeout / 1000
+          )}s. Check whether the upload actually started, or clear the "entities grid row" binding to skip this check.`
+        );
+      }
     }
 
     // Fills in the Entity name field and resolves it against D365's own
@@ -246,19 +281,11 @@
         const matchResult = await matchEntityName(id, item, bindings, options);
         if (matchResult.needsReview) return { needsReview: true };
 
-        attachFile(await requireBoundEl(bindings, 'fileTarget', options), item.file);
-
         updateItem(id, { status: 'uploading' });
-        // Optional: the file is attached to the input directly, so this is
-        // only needed where D365 waits for an explicit commit click.
-        const uploadEl = findBoundEl(bindings, 'uploadButton');
-        if (uploadEl) domUtils.clickElement(uploadEl);
+        await attachFile(bindings, item, options);
 
         if (baselineCount !== null) {
-          await domUtils.waitFor(() => countGridRows(bindings) > baselineCount, {
-            timeout: options.uploadTimeout || 60000,
-            interval: 500
-          });
+          await waitForGridRow(bindings, baselineCount, options);
         } else {
           await sleep(options.stepDelay || 700);
         }
@@ -313,16 +340,11 @@
         if (suggestionSelector) selectSuggestion(suggestionSelector, chosenSuggestionText);
 
         const baselineCount = countGridRows(bindings);
-        attachFile(await requireBoundEl(bindings, 'fileTarget', options), item.file);
         updateItem(id, { status: 'uploading', matchedEntity: chosenSuggestionText });
-        const uploadEl = findBoundEl(bindings, 'uploadButton');
-        if (uploadEl) domUtils.clickElement(uploadEl);
+        await attachFile(bindings, item, options || {});
 
         if (baselineCount !== null) {
-          await domUtils.waitFor(() => countGridRows(bindings) > baselineCount, {
-            timeout: (options && options.uploadTimeout) || 60000,
-            interval: 500
-          });
+          await waitForGridRow(bindings, baselineCount, options);
         } else {
           await sleep((options && options.stepDelay) || 700);
         }

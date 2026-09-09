@@ -61,17 +61,6 @@
     fireEvent(fileInputEl, 'change');
   }
 
-  // For UI that only accepts drag-and-drop (no reachable file input), this
-  // replays the drag/drop sequence with a real DataTransfer carrying the file.
-  function dropFileOnDropTarget(targetEl, file) {
-    const dt = new DataTransfer();
-    dt.items.add(file);
-    ['dragenter', 'dragover', 'drop'].forEach((type) => {
-      const evt = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
-      targetEl.dispatchEvent(evt);
-    });
-  }
-
   function waitFor(checkFn, { timeout = 4000, interval = 100 } = {}) {
     return new Promise((resolve, reject) => {
       const start = Date.now();
@@ -286,9 +275,10 @@
 
   // Finds the real <input type="file"> behind an upload control. Users bind
   // the visible box or button, but the input that actually accepts a file is
-  // usually a hidden sibling. Never matches this extension's own picker.
+  // usually a hidden sibling. Never matches this extension's own inputs.
   function resolveFileInput(el) {
-    const SELECTOR = 'input[type="file"]:not(#d365ia-file-input)';
+    const SELECTOR =
+      'input[type="file"]:not(#d365ia-file-input):not(#d365ia-file-transfer)';
     if (el.tagName === 'INPUT' && el.type === 'file') return el;
     const inside = el.querySelector && el.querySelector(SELECTOR);
     if (inside) return inside;
@@ -337,13 +327,48 @@
     return true;
   }
 
+  // Hands a file to the page-world hook (content/page-hook.js) so that when
+  // D365 tries to open the OS file picker, it receives this file instead.
+  // The File itself travels through a hidden input in the shared DOM,
+  // because it can't be passed in a cross-world event payload.
+  let hookFired = false;
+  window.addEventListener('d365ia:file-hook-fired', () => {
+    hookFired = true;
+  });
+
+  function armFileHook(file) {
+    let transfer = document.getElementById('d365ia-file-transfer');
+    if (!transfer) {
+      transfer = document.createElement('input');
+      transfer.type = 'file';
+      transfer.id = 'd365ia-file-transfer';
+      transfer.style.display = 'none';
+      document.body.appendChild(transfer);
+    }
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    transfer.files = dt.files;
+
+    hookFired = false;
+    window.dispatchEvent(new CustomEvent('d365ia:arm-file-hook'));
+  }
+
+  function disarmFileHook() {
+    window.dispatchEvent(new CustomEvent('d365ia:disarm-file-hook'));
+    const transfer = document.getElementById('d365ia-file-transfer');
+    if (transfer) transfer.value = '';
+  }
+
+  function fileHookFired() {
+    return hookFired;
+  }
+
   D365IA.domUtils = {
     setNativeValue,
     fireEvent,
     typeIntoField,
     commitField,
     dropFileOnInput,
-    dropFileOnDropTarget,
     waitFor,
     getSelector,
     getGeneralizedListSelector,
@@ -354,6 +379,9 @@
     queryAllVisible,
     resolveTextInput,
     resolveSelect,
-    resolveFileInput
+    resolveFileInput,
+    armFileHook,
+    disarmFileHook,
+    fileHookFired
   };
 })();

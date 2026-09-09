@@ -173,9 +173,25 @@ icons/                  Toolbar/extension icons
 
 ## Notes on how file attachment works
 
-Browsers won't let a script silently pick a file from disk — the user has to
-supply it. Here, you already supplied it via the real drag-and-drop gesture
-onto the panel. The extension then re-attaches that same `File` object to
-D365's own file input/drop target using a `DataTransfer` object (the same
-mechanism browsers use internally for drag-and-drop), so D365 sees it exactly
-as if you'd dropped or browsed to it yourself.
+**You never tell the extension where your files live, and there's no folder
+to configure.** Browsers won't let a script read a file from disk on its own —
+the user has to supply it. Dragging files onto the panel *is* that supply
+step: the browser hands over the real `File` objects, contents included. The
+queue then feeds them to D365 one per Add-file cycle, in drop order.
+
+The obstacle is that D365's "Upload and add" button opens the operating
+system's file picker, which no extension can drive or dismiss. So
+`content/page-hook.js` runs in the **page's** JavaScript world (via the
+manifest's `"world": "MAIN"`, unlike every other script here, which runs
+isolated) and replaces `HTMLInputElement.prototype.click` and `showPicker`.
+When D365 asks for the picker, the hook answers with the already-dropped
+file instead of opening it — same code path D365 would run after you picked
+the file by hand, minus the dialog.
+
+The file itself crosses from the extension's isolated world into the page
+world through a hidden `<input type="file">` in the shared DOM, since a
+`File` can't be passed in a cross-world event payload.
+
+If the hook doesn't fire (a D365 version that opens the picker some other
+way), the queue falls back to writing the file straight into a reachable
+`<input type="file">`, and reports a clear error if neither works.

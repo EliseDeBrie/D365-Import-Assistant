@@ -26,7 +26,7 @@
     fileTarget:
       'Alt+click the visible "Upload data file" box — the hidden input that actually takes the file is found from there automatically.',
     uploadButton:
-      'Optional. The file is attached directly, so leave this unbound if the button opens a file-picker dialog ("Browse"). Bind it only if D365 needs an explicit commit click.',
+      'The "Upload and add" button. Bind it even though it normally opens a file-picker dialog — that dialog is intercepted and answered with the dropped file, so it won\'t appear.',
     entitiesGridRow:
       'Add one file manually first so a row exists to click. Used to detect success — falls back to a fixed pause if left unbound.',
     runImportButton: 'Only clicked if auto-run is turned on in Settings; otherwise never touched.'
