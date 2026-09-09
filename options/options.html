@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <h1>D365 Import Assistant — Settings</h1>
+
+    <section>
+      <h2>Filename cleaning rules</h2>
+      <label><input type="checkbox" id="stripLeadingNumbers" /> Strip leading numbers (e.g. "01_Customers.xlsx")</label>
+      <label><input type="checkbox" id="stripTrailingNumbers" /> Strip trailing numbers (e.g. "Customers_01.xlsx")</label>
+      <label><input type="checkbox" id="stripDates" /> Strip dates/timestamps (e.g. "Customers_20240115.xlsx")</label>
+      <label><input type="checkbox" id="stripVersionSuffixes" /> Strip version words (v2, (2), copy, final, draft)</label>
+      <label><input type="checkbox" id="separatorsToSpaces" /> Turn underscores/dashes into spaces</label>
+      <label><input type="checkbox" id="titleCase" /> Title Case the result</label>
+    </section>
+
+    <section>
+      <h2>Try it</h2>
+      <input type="text" id="testInput" placeholder="e.g. 01_CustomersV3_20240115.xlsx" />
+      <div id="testOutput" class="output"></div>
+    </section>
+
+    <section>
+      <h2>Matching</h2>
+      <label
+        >Match confidence threshold (0–1):
+        <input type="number" id="matchThreshold" min="0" max="1" step="0.05" />
+      </label>
+      <label
+        >Delay between files (ms):
+        <input type="number" id="stepDelay" min="0" step="100" />
+      </label>
+      <label><input type="checkbox" id="autoAddRow" /> Automatically click "Add row" between files</label>
+    </section>
+
+    <section>
+      <h2>Field bindings</h2>
+      <p>
+        Bindings are set from the floating panel on the D365 page ("Setup fields") since D365's layout
+        varies by environment/version. Current bindings:
+      </p>
+      <ul id="bindingsList"></ul>
+      <button id="clearBindings" class="secondary">Clear all bindings</button>
+    </section>
+
+    <button id="save">Save settings</button>
+    <span id="saveStatus"></span>
+
+    <script src="../content/matcher.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>
