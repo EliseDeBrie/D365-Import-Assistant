@@ -6,7 +6,7 @@ An Edge/Chromium extension for the Dynamics 365 Finance & Operations
 **Data management → Import** screen. Drag a folder of Excel files onto it and
 it auto-fills the D365 "Entity name" field for each one, guessing the entity
 from the cleaned-up file name, then attaches the file — no typing per file.
-![Uploading import-demo.gif…]()
+<img width="640" height="579" alt="import-demo" src="https://github.com/user-attachments/assets/87766f6e-04e4-4f8a-a3b3-7f2cdeb91a2b" />
 
 > **Status: beta.** Test it in a sandbox environment before you use it
 > against production, and see *Known limitations* below.
