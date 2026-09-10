@@ -105,7 +105,7 @@
   function createLauncher(onOpen, position) {
     const btn = document.createElement('button');
     btn.id = 'd365ia-launcher';
-    btn.textContent = 'Import Assist';
+    btn.textContent = 'Import Assistant';
     btn.title = 'Click to open. Drag to move. Hide it in the extension popup.';
     if (position && position.left && position.top) {
       btn.style.left = position.left;

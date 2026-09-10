@@ -3,7 +3,7 @@
 // Builds the store-ready extension zip.
 //
 // This exists because hand-zipping the project folder produces an archive
-// with everything nested under "D365-Import-Assistant/", which both the Edge
+// with everything nested under a top-level folder, which both the Edge
 // Add-ons and Chrome Web Store reject on upload -- the manifest has to sit at
 // the archive root. "Load unpacked" is happy either way, so the mistake
 // survives local testing and only surfaces at submission. This script writes
@@ -58,6 +58,23 @@ function collectFiles() {
 // means an extension that installs and then breaks on the one code path that
 // needed the missing file, which is a miserable thing to discover from a
 // store review queue.
+// The store enforces a 132-character ceiling on manifest.description, and
+// rejects the upload rather than truncating. It is an easy limit to blow
+// through when the description is rewritten to describe the real scope, and a
+// slow way to find out -- so it fails here instead.
+const DESCRIPTION_LIMIT = 132;
+
+function checkDescription(manifest) {
+  const d = manifest.description || '';
+  if (!d) throw new Error('manifest.json has no description; the store requires one.');
+  if (d.length > DESCRIPTION_LIMIT) {
+    throw new Error(
+      `manifest.json description is ${d.length} characters; the store allows ${DESCRIPTION_LIMIT}.\n` +
+        `  Long-form copy belongs in the store listing, not the manifest.`
+    );
+  }
+}
+
 function checkManifestReferences(manifest, shipped) {
   const refs = new Set();
   const add = (v) => v && refs.add(v);
@@ -172,16 +189,27 @@ function buildZip(files) {
 
 function main() {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+  checkDescription(manifest);
   const files = collectFiles();
   const refCount = checkManifestReferences(manifest, files);
 
   const zip = buildZip(files);
   fs.mkdirSync(OUT_DIR, { recursive: true });
-  const outPath = path.join(OUT_DIR, `D365ImportAssistant-v${manifest.version}.zip`);
+
+  // The archive is named from version_name when there is one, so a beta build
+  // cannot end up in a file called plain "v1.12.0". manifest.version itself
+  // must stay numeric -- the browser rejects anything else -- which is why the
+  // beta marker lives in version_name and gets carried through to here rather
+  // than being typed into the file name by hand.
+  const label = (manifest.version_name || manifest.version).replace(/[^0-9A-Za-z.]+/g, '-');
+  const outPath = path.join(OUT_DIR, `D365ImportAssistant-v${label}.zip`);
   fs.writeFileSync(outPath, zip);
 
   const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
-  console.log(`Packaged ${manifest.name} v${manifest.version}`);
+  console.log(`Packaged ${manifest.name} ${manifest.version_name || manifest.version}`);
+  if (manifest.version_name) {
+    console.log(`  store version ${manifest.version}, shown to users as "${manifest.version_name}"`);
+  }
   console.log(`  ${files.length} files, ${refCount} of them referenced by the manifest`);
   console.log(`  manifest.json is at the archive root (required by the store)`);
   console.log(`  ${path.relative(ROOT, outPath)} — ${kb(zip.length)}`);

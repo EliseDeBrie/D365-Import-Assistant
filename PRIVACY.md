@@ -14,7 +14,7 @@ The extension only runs on pages under `https://*.dynamics.com` (its
 else — it cannot read or act on any other site you visit).
 
 That domain covers more than Finance & Operations, so the scripts also load
-on other Dynamics apps hosted there. The **Import Assist** button is limited
+on other Dynamics apps hosted there. The **Import Assistant** button is limited
 to the Data management pages (configurable under *Where the button appears*),
 but `content/page-hook.js` — the small script that lets D365's own upload
 control accept a dropped file — loads on every `dynamics.com` page. It takes

@@ -37,7 +37,7 @@ limitations*.
 
 ## How it works
 
-1. A floating **Import Assist** button appears on the Data management pages
+1. A floating **Import Assistant** button appears on the Data management pages
    only — by default, URLs containing `mi=DM_DataManagementWorkspaceMenuItem`
    — so it stays out of the way the rest of the time. Drag it anywhere on
    screen and it stays there; change which pages it appears on, or switch it
@@ -192,7 +192,7 @@ differ. If you do need to bind, the setup list is in the same order as the
 real click sequence:
 
 1. Open the Data management → Import screen you use.
-2. Click **Import Assist → Setup fields**.
+2. Click **Import Assistant → Setup fields**.
 3. Click **Bind** next to a row. The setup dialog hides itself and the page
    behaves completely normally again — click into fields, type, open
    dropdowns, whatever it takes to reveal the actual element you want. When
@@ -328,6 +328,25 @@ npm run package
 
 Writes `dist/D365ImportAssistant-v<version>.zip`, ready to upload to the Edge
 Add-ons or Chrome Web Store.
+
+### Versioning, and the beta marker
+
+`manifest.json` carries two version fields, because it has to:
+
+- **`version`** (`1.12.0`) is what the store orders releases by. It must be
+  one to four dot-separated integers — the browser rejects a manifest whose
+  `version` contains anything else, so `1.12.0-beta` is not an option here.
+- **`version_name`** (`1.12.0 beta`) is free text, and is what the browser
+  actually shows in `edge://extensions`. This is where the beta marker lives.
+
+The packaged file name is derived from `version_name` when it's present, so a
+beta build can't end up in a file called plain `v1.12.0` — which is exactly
+how a hand-named archive and the manifest inside it drift apart.
+
+**To ship a stable release:** delete the `version_name` line, bump `version`,
+and drop the *Status: beta* notice at the top of this file. Note that the
+store rejects re-uploading a version number it has already seen, so `version`
+has to increase for every submission, beta or not.
 
 Use this rather than zipping the folder by hand. A hand-made archive puts
 everything under a top-level folder, and **both stores reject a zip whose
