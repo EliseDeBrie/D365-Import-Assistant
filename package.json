@@ -13,10 +13,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/EliseDeBrie/D365-Data-management-helper-tool"
+    "url": "https://github.com/EliseDeBrie/D365-Import-Assistant"
   },
   "bugs": {
-    "url": "https://github.com/EliseDeBrie/D365-Data-management-helper-tool/issues"
+    "url": "https://github.com/EliseDeBrie/D365-Import-Assistant/issues"
   },
-  "homepage": "https://github.com/EliseDeBrie/D365-Data-management-helper-tool#readme"
+  "homepage": "https://github.com/EliseDeBrie/D365-Import-Assistant#readme"
 }
