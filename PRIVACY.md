@@ -4,8 +4,8 @@ _Last updated: 2026-09-09_
 
 This is a browser extension, not a service — there is no backend server
 operated by the developer, and nothing described below is sent to the
-developer, to D365Solutions, or to any third party. Everything it does
-happens inside your own browser, on your own machine.
+developer or to any third party. Everything it does happens inside your own
+browser, on your own machine.
 
 ## What the extension can see
 
