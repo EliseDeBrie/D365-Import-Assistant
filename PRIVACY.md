@@ -9,9 +9,17 @@ happens inside your own browser, on your own machine.
 
 ## What the extension can see
 
-The extension only runs on pages under `*.dynamics.com` (its
+The extension only runs on pages under `https://*.dynamics.com` (its
 `host_permissions` in `manifest.json` are scoped to that domain and nothing
 else — it cannot read or act on any other site you visit).
+
+That domain covers more than Finance & Operations, so the scripts also load
+on other Dynamics apps hosted there. The **Import Assist** button is limited
+to the Data management pages (configurable under *Where the button appears*),
+but `content/page-hook.js` — the small script that lets D365's own upload
+control accept a dropped file — loads on every `dynamics.com` page. It takes
+no action unless a run you started has armed it, and it reports only whether
+an upload request to D365 finished.
 
 On those pages, it can:
 
@@ -19,8 +27,9 @@ On those pages, it can:
   Import screen (source format, entity name, sheet, file upload), the same
   way a person clicking through the screen would.
 - **Read the files you drag onto it.** Excel workbooks are opened locally
-  (in your browser) just far enough to list their sheet names — the file's
-  contents are never parsed, transmitted, or stored beyond that. The file
+  (in your browser) just far enough to list their sheet names: the workbook's
+  index (`xl/workbook.xml` inside the `.xlsx` zip) is read, and nothing else.
+  The cell data is never read, transmitted, or stored. The file
   itself goes only where you were already sending it: into D365's own
   upload control, via D365's own upload mechanism.
 - **Call your own tenant's OData service document** (`<your D365
@@ -47,7 +56,7 @@ What's stored:
 | --- | --- | --- |
 | Cleaning rules, run options, UI preferences (whether the launcher shows, which pages it appears on) | `chrome.storage.sync` | Remembering your settings |
 | Field-selector bindings, per D365 host | `chrome.storage.sync` | Letting the extension find the right controls on your environment |
-| Cached entity name list | `chrome.storage.local` | Avoiding re-fetching the list on every run |
+| Cached entity name list (one list per browser profile, not per environment) | `chrome.storage.local` | Avoiding re-fetching the list on every run |
 | Launcher button position | `chrome.storage.local` | Remembering where you dragged it |
 
 None of this is a file's contents, a password, a session token, or anything

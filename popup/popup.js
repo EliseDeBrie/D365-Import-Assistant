@@ -68,7 +68,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Confirms, right here, that the extension is live on whichever D365
 // environment the active tab happens to be on right now -- no URL to type
 // in, no per-environment setup. host_permissions is a wildcard
-// (*://*.dynamics.com/*), so any sandbox or production tenant, including one
+// (https://*.dynamics.com/*), so any sandbox or production tenant, including one
 // created after this extension was installed, works the moment you're on it.
 async function showCurrentEnvironment() {
   const envEl = document.getElementById('envStatus');

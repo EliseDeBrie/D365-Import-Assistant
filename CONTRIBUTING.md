@@ -6,7 +6,7 @@ better are all welcome.
 
 ## License note
 
-This repository is licensed under **AGPL-3.0-or-later** (see `LICENSE`).
+This repository is licensed under **MIT** (see `LICENSE`).
 By submitting a pull request you agree your contribution is licensed under
 the same terms as the rest of the project. There's no separate CLA to sign
 — the license itself is the agreement.

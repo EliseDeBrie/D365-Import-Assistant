@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "D365 Import Assistant",
   "version": "1.12.0",
-  "description": "Drag and drop Excel files onto a D365 Finance & Operations data entity import screen and auto-fill the entity name from the cleaned-up file name.",
+  "description": "Prepare a D365 Finance & Operations Data management import project in one go: drop a batch of Excel, CSV or data-package files on the page and the extension suggests the data entity, picks the worksheet and uploads each file, pausing any match it is not sure about.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -26,12 +26,12 @@
     "storage"
   ],
   "host_permissions": [
-    "*://*.dynamics.com/*"
+    "https://*.dynamics.com/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "*://*.dynamics.com/*"
+        "https://*.dynamics.com/*"
       ],
       "js": [
         "content/page-hook.js"
@@ -42,7 +42,7 @@
     },
     {
       "matches": [
-        "*://*.dynamics.com/*"
+        "https://*.dynamics.com/*"
       ],
       "js": [
         "content/dom-utils.js",

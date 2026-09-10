@@ -1,29 +1,39 @@
 # D365 Import Assistant
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 An Edge/Chromium extension for the Dynamics 365 Finance & Operations
 **Data management → Import** screen. Drag a folder of Excel files onto it and
 it auto-fills the D365 "Entity name" field for each one, guessing the entity
 from the cleaned-up file name, then attaches the file — no typing per file.
 
-Licensed under [AGPL-3.0-or-later](LICENSE) — see *License* below for what
-that means in practice. See [`PRIVACY.md`](PRIVACY.md) for exactly what the
+> **Status: beta.** Test it in a sandbox environment before you use it
+> against production, and see *Known limitations* below.
+
+Licensed under [MIT](LICENSE). See [`PRIVACY.md`](PRIVACY.md) for exactly what the
 extension can see and where it's stored (short version: nothing leaves your
 browser except calls to your own D365 tenant).
 
-### Works on any D365 environment, automatically
+### Designed to work across D365 F&O environments
 
-There is no URL to configure, and nothing to change when a sandbox is
+There is no tenant URL to configure, and nothing to change when a sandbox is
 rebuilt or you move to a new tenant. The extension's permissions
 (`host_permissions` in `manifest.json`) are a wildcard —
-`*://*.dynamics.com/*` — so it activates on whichever D365 F&O environment
-you're actually on, the moment you're on it. Bindings and the cached entity
-list are keyed per-hostname automatically (see *Why bindings prefer
-`data-dyn-controlname`* below), so a new environment just gets the shipped
-defaults until you rebind anything for it — no manual setup, no per-tenant
-install. Open the toolbar popup on any D365 page and it shows *Active on:
-\<hostname\>*, confirming it picked up the new environment.
+`https://*.dynamics.com/*` — so it activates on whichever D365 environment
+you're on, the moment you're on it. Field bindings are stored per environment
+hostname (see *Why bindings prefer `data-dyn-controlname`* below), so a new
+environment starts on the shipped defaults until you rebind anything for it —
+no manual setup, no per-tenant install. Open the toolbar popup on any D365
+page and it shows *Active on: \<hostname\>*, confirming it picked up the new
+environment.
+
+The cached entity list is *not* per environment: it's stored once per browser
+profile, so after switching tenants press **Load** again in the panel to
+refresh it for the environment you're now on.
+
+It drives D365's standard user interface, so a customised environment or a
+future Microsoft interface change can require rebinding — see *Known
+limitations*.
 
 ## How it works
 
@@ -74,8 +84,8 @@ install. Open the toolbar popup on any D365 page and it shows *Active on:
    - types the cleaned name into the **Entity name** field, picks D365's
      best-scoring autocomplete suggestion where one is available, and
      confirms the field actually kept the value,
-   - attaches the Excel file — the upload box only renders once a valid
-     entity is selected,
+   - attaches the Excel file — in the currently supported D365 import flow,
+     the upload control becomes available once the entity has been selected,
    - waits for D365 to confirm the file landed (see *How the extension knows
      a file landed* below), then for the panel to reset, before moving on.
 5. If no suggestion is a confident match, that file is marked
@@ -208,14 +218,17 @@ real click sequence:
      autocomplete opens, *then* Alt+click one suggestion row in that list.
    - **File target** — the file input or drop target for that row.
    - **Upload button** — the row's Upload button.
-   - **Entities grid row** *(optional but recommended)* — add one file
-     manually first so a row exists in the grid of already-uploaded
-     entities, then Alt+click that row. This is how the extension knows a
-     file finished uploading; without it, it just waits a fixed pause
-     (configurable in Settings) and assumes success.
+   - **Entities grid row** *(optional)* — add one file manually first so a
+     row exists in the grid of already-uploaded entities, then Alt+click that
+     row. This is one more upload-confirmation signal, not the only one: the
+     extension also confirms a file landed through D365's `/fileUpload`
+     response, its message bar, or the Add file panel clearing (see *How the
+     extension knows a file landed* above), so this binding is normally not
+     needed.
    - **Import/Run button** *(optional)* — the page-level button that actually
-     runs the import job. Only clicked if you turn on auto-run in Settings;
-     otherwise it's never touched.
+     runs the import job. Needed only for **Upload + Import**; a plain
+     **Upload** run never touches it. Bind **Close panel button** too, since
+     the panel is closed before the import starts.
 4. Bindings are saved (`chrome.storage.sync`) and reused automatically next
    time — you shouldn't need to redo this unless D365 changes its layout.
 
@@ -307,6 +320,30 @@ current rules before running a real import.
 3. Click **Load unpacked** and select this folder.
 4. Pin the extension if you want quick access to the popup/status.
 
+## Building a package to distribute
+
+```
+npm run package
+```
+
+Writes `dist/D365ImportAssistant-v<version>.zip`, ready to upload to the Edge
+Add-ons or Chrome Web Store.
+
+Use this rather than zipping the folder by hand. A hand-made archive puts
+everything under a top-level folder, and **both stores reject a zip whose
+`manifest.json` isn't at the archive root** — while *Load unpacked* accepts
+it either way, so the mistake survives local testing and only shows up at
+submission. The script writes paths relative to the extension root, so the
+shape is correct by construction.
+
+It also ships only what the extension needs (`manifest.json`, `background.js`,
+`content/`, `icons/`, `options/`, `popup/`, `styles/`, plus `LICENSE` and
+`PRIVACY.md`) — the tests, this README and `package.json` stay out. The list
+is an allow-list in `scripts/package.js`, so anything added to the repo later
+has to be named there before it reaches users. Before writing the zip it
+checks that every file `manifest.json` references is actually present, and
+fails the build if one isn't.
+
 ## Project layout
 
 ```
@@ -321,7 +358,8 @@ content/
                             confirm) + storage
   queue.js                 Batch queue: replays Add file -> Source format
                             -> Entity name -> File -> Upload per file,
-                            waits for the entities grid, pauses on ambiguity
+                            verifies each step, pauses on ambiguity, waits
+                            for whichever upload-confirmation signal arrives
   dropzone.js               Floating drop panel UI
   setup-modal.js             "Bind D365 fields" modal
   content.js                  Wires it all together, injects the launcher,
@@ -331,6 +369,7 @@ popup/                  Toolbar popup (status + link to settings)
 styles/dropzone.css     All injected UI styling
 icons/                  Toolbar/extension icons
 test/                   jsdom test suite (see below)
+scripts/package.js      Builds the store-ready zip (npm run package)
 ```
 
 ## Running the tests
@@ -345,7 +384,8 @@ against `test/fake-d365.js` — a stand-in for the Import form that copies the
 behaviours that actually caused bugs here:
 
 - the entity name field only exists for Excel/CSV, never for a data package;
-- the upload box only appears once an entity name has been *committed*;
+- in the currently supported D365 import flow, the upload box only appears
+  once an entity name has been *committed*;
 - the lookups **discard typed text** — a value only sticks if it was chosen
   from the list, which is what broke the sheet picker;
 - the panel comes back blank after each upload, which is what broke the
@@ -386,33 +426,54 @@ If the hook doesn't fire (a D365 version that opens the picker some other
 way), the queue falls back to writing the file straight into a reachable
 `<input type="file">`, and reports a clear error if neither works.
 
+## Known limitations
+
+- It's a beta. Test it in a sandbox before running it against production.
+- It drives D365's standard user interface rather than an API, so a
+  customised environment or a future Microsoft interface change can require
+  rebinding a field.
+- The success message it watches for on D365's message bar is matched in
+  **English**. On a differently-localised D365 that signal never fires, and
+  confirmation falls back to the upload response, the panel reset, or the
+  entities-grid row.
+- Entity matching is only as good as your file names plus the suggestions
+  D365 itself returns. Nothing is typed in blind: an unconfident match is
+  parked as **needs-review** for you to resolve.
+- The entity-name hint compares against OData's *technical* names
+  (`OperationalSitesV2`), while the import form shows *display labels*
+  (`Sites V2`), so a "not in entity list" badge is common and often harmless.
+- The cached entity list is stored once per browser profile, not per
+  environment — press **Load** again after switching tenants.
+- Data packages (`.zip`) carry their own manifest, so entity and sheet
+  selection are skipped for them.
+- Only the one documented duplicate-sheet confirmation is answered
+  automatically; any other D365 dialog is left untouched and reported.
+- Distributed as an unpacked Edge/Chromium extension, which a managed device
+  may block. Validate it on the browser you intend to use.
+- It prepares — and optionally starts — an import. It does not validate that
+  the data itself is correct.
+
 ## License
 
-[AGPL-3.0-or-later](LICENSE) — GNU Affero General Public License, version 3
-or later.
+[MIT](LICENSE).
 
 In practice, this means:
 
-- **You can use, study, modify, and redistribute this code freely,**
-  including in a commercial setting — install it across your whole
-  organization, fork it, change it to fit your own D365 environment.
-- **If you distribute a modified version — including running it as a
-  hosted/web service — you have to make that version's source available
-  under the same license.** This is what the "A" in AGPL adds over plain
-  GPL: it closes the loophole where someone could take the code, improve
-  it, and offer it as a closed service without ever redistributing the
-  binary. Installing and using it privately, unmodified or modified,
-  never triggers this — only distributing or hosting a modified version
-  does.
+- **You can use, study, modify, redistribute and sell this code freely**,
+  including inside a closed-source product. Install it across your whole
+  organization, fork it, change it to fit your own D365 environment — the
+  only condition is that the copyright notice in `LICENSE` travels with it.
 - **There is no warranty.** The license is provided AS IS, per the text in
   `LICENSE`.
 
-D365Solutions holds the copyright and, as with any AGPL project, remains
-free to offer the same code under different (e.g. commercial) terms to
-anyone who doesn't want the AGPL's conditions — the AGPL only governs how
-*this* copy can be used and redistributed by everyone else. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md) if you'd like to submit changes; a pull
-request is accepted under the same license as the rest of the repo, no
+MIT was chosen deliberately over a copyleft license. This is a client-side
+browser extension, so the "hosted service" clause that an AGPL license exists
+to enforce has nothing to attach to here — while the license itself would be
+enough for some organizations' policies to block installing it at all. The
+point of this project is that people can actually run it.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) if you'd like to submit changes; a
+pull request is accepted under the same license as the rest of the repo, no
 separate agreement needed.
 
 ## Privacy

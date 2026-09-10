@@ -2,14 +2,15 @@
   "name": "d365-data-management-helper-tool",
   "version": "1.12.0",
   "private": true,
-  "description": "Edge/Chromium extension that fills in D365 F&O data entity imports from dropped files.",
+  "description": "Edge/Chromium extension that prepares D365 F&O Data management import projects from a batch of dropped files.",
   "scripts": {
-    "test": "node test/run.js"
+    "test": "node test/run.js",
+    "package": "node scripts/package.js"
   },
   "devDependencies": {
     "jsdom": "^30.0.1"
   },
-  "license": "AGPL-3.0-or-later",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/D365Solutions/D365-Data-management-helper-tool"
