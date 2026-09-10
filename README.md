@@ -333,15 +333,20 @@ Add-ons or Chrome Web Store.
 
 `manifest.json` carries two version fields, because it has to:
 
-- **`version`** (`1.12.0`) is what the store orders releases by. It must be
+- **`version`** (`0.1.0`) is what the store orders releases by. It must be
   one to four dot-separated integers — the browser rejects a manifest whose
-  `version` contains anything else, so `1.12.0-beta` is not an option here.
-- **`version_name`** (`1.12.0 beta`) is free text, and is what the browser
+  `version` contains anything else, so `0.1.0-beta` is not an option here.
+- **`version_name`** (`0.1.0 beta`) is free text, and is what the browser
   actually shows in `edge://extensions`. This is where the beta marker lives.
 
 The packaged file name is derived from `version_name` when it's present, so a
-beta build can't end up in a file called plain `v1.12.0` — which is exactly
+beta build can't end up in a file called plain `v0.1.0` — which is exactly
 how a hand-named archive and the manifest inside it drift apart.
+
+The number starts at `0.1.0` because that is what this is: a first public
+beta. Earlier builds carried higher numbers, but those counted development
+iterations rather than releases, and shipping a first public version as
+`1.12.0` would imply eleven releases that never happened.
 
 **To ship a stable release:** delete the `version_name` line, bump `version`,
 and drop the *Status: beta* notice at the top of this file. Note that the

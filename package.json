@@ -1,6 +1,6 @@
 {
   "name": "d365-import-assistant",
-  "version": "1.12.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Edge/Chromium extension that prepares D365 F&O Data management import projects from a batch of dropped files.",
   "scripts": {
