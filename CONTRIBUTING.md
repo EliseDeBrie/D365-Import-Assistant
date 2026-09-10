@@ -14,7 +14,7 @@ the same terms as the rest of the project. There's no separate CLA to sign
 ## Getting set up
 
 ```
-git clone https://github.com/D365Solutions/D365-Data-management-helper-tool
+git clone https://github.com/EliseDeBrie/D365-Data-management-helper-tool
 cd D365-Data-management-helper-tool
 npm install
 npm test

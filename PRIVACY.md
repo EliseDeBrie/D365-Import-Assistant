@@ -75,7 +75,7 @@ that identifies you personally beyond the D365 hostnames you've used it on.
 ## Source code
 
 The full source is available at
-<https://github.com/D365Solutions/D365-Data-management-helper-tool> — every
+<https://github.com/EliseDeBrie/D365-Data-management-helper-tool> — every
 claim above can be checked directly against `content/entity-list.js` (the
 only `fetch` call the extension makes) and the `chrome.storage` calls
 throughout `content/` and `background.js`.
@@ -89,4 +89,4 @@ in Git is the change history of this policy too.
 ## Contact
 
 Questions or concerns: open an issue at
-<https://github.com/D365Solutions/D365-Data-management-helper-tool/issues>.
+<https://github.com/EliseDeBrie/D365-Data-management-helper-tool/issues>.
