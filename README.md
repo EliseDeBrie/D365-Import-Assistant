@@ -474,7 +474,9 @@ point of this project is that people can actually run it.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) if you'd like to submit changes; a
 pull request is accepted under the same license as the rest of the repo, no
-separate agreement needed.
+separate agreement needed. Contributors keep the copyright in their own
+changes, which are licensed to everyone — including the maintainers — under
+the MIT terms like the rest of the project.
 
 ## Privacy
 
