@@ -140,3 +140,13 @@ test('finds the workbook among several zip entries', async () => {
   const names = await D365IA.xlsxSheets.readSheetNames(asFile(zip, 'book.xlsx'));
   equal(names, ['en_us', 'DataSheet1']);
 });
+
+// A workbook index that inflates far beyond anything Excel writes is a
+// decompression bomb, not a workbook: give up rather than exhaust the tab.
+test('refuses a workbook index that inflates past the size limit', async () => {
+  const padding = ' '.repeat(5 * 1024 * 1024);
+  const xml = `<workbook>${padding}<sheets><sheet name="Sheet1" sheetId="1"/></sheets></workbook>`;
+  const zip = makeZip([{ name: 'xl/workbook.xml', content: xml }]);
+  const names = await D365IA.xlsxSheets.readSheetNames(asFile(zip, 'bomb.xlsx'));
+  equal(names, []);
+});

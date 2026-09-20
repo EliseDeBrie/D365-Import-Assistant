@@ -20,9 +20,35 @@
     return -1;
   }
 
+  // workbook.xml is a few KB even for huge workbooks. Files arrive from
+  // third parties, and a crafted entry that inflates to gigabytes would take
+  // the whole D365 tab down with it, so inflation stops at this ceiling.
+  const MAX_INFLATED_BYTES = 4 * 1024 * 1024;
+
   async function inflateRaw(bytes) {
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-    return new Uint8Array(await new Response(stream).arrayBuffer());
+    const reader = new Blob([bytes])
+      .stream()
+      .pipeThrough(new DecompressionStream('deflate-raw'))
+      .getReader();
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_INFLATED_BYTES) {
+        await reader.cancel();
+        throw new Error('workbook index exceeds the size limit');
+      }
+      chunks.push(value);
+    }
+    const out = new Uint8Array(total);
+    let offset = 0;
+    chunks.forEach((chunk) => {
+      out.set(chunk, offset);
+      offset += chunk.byteLength;
+    });
+    return out;
   }
 
   async function readZipEntry(buffer, wantedName) {

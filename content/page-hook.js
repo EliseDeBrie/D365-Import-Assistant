@@ -59,12 +59,12 @@
   // observed from the page's own world, which is why this lives here.
   //
   // These wrappers are installed the first time a run arms the hook in this
-  // frame, never at load. This script matches every *.dynamics.com page --
-  // including Dynamics apps that are not Finance & Operations -- and leaving
-  // a permanent wrapper around fetch and XMLHttpRequest on pages where the
-  // extension is never used is not something a reviewer should have to take
-  // on trust. Arming always precedes the upload it is watching for (see
-  // armFileHook in content/dom-utils.js), so nothing is missed.
+  // frame, never at load. This script runs on every Finance & Operations
+  // page, not just the Import screen, and leaving a permanent wrapper around
+  // fetch and XMLHttpRequest on pages where the extension is never used is
+  // not something a reviewer should have to take on trust. Arming always
+  // precedes the upload it is watching for (see armFileHook in
+  // content/dom-utils.js), so nothing is missed.
   let watchersInstalled = false;
 
   function installUploadWatchers() {

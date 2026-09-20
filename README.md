@@ -19,18 +19,21 @@ browser except calls to your own D365 tenant).
 
 There is no tenant URL to configure, and nothing to change when a sandbox is
 rebuilt or you move to a new tenant. The extension's permissions
-(`host_permissions` in `manifest.json`) are a wildcard —
-`https://*.dynamics.com/*` — so it activates on whichever D365 environment
-you're on, the moment you're on it. Field bindings are stored per environment
-hostname (see *Why bindings prefer `data-dyn-controlname`* below), so a new
-environment starts on the shipped defaults until you rebind anything for it —
-no manual setup, no per-tenant install. Open the toolbar popup on any D365
-page and it shows *Active on: \<hostname\>*, confirming it picked up the new
+(`host_permissions` in `manifest.json`) are wildcards over the Finance &
+Operations hostnames — `https://*.operations.dynamics.com/*`, the regional
+variants Microsoft documents (`*.operations.eu.dynamics.com`, `.fr`, `.no`,
+`.sa`, `.ch`, `.uae`) and the legacy `*.axcloud.dynamics.com` /
+`*.cloudax.dynamics.com` — so it activates on whichever F&O environment
+you're on, the moment you're on it, and never loads on other Dynamics
+products (Sales, Business Central, Customer Insights) that share the
+`dynamics.com` domain. US Government clouds (`*.microsoftdynamics.us`) are
+not covered; add them to `manifest.json` if you need them. Field bindings and
+the cached entity list are both stored per environment hostname (see *Why
+bindings prefer `data-dyn-controlname`* below), so a new environment starts
+on the shipped defaults with no entity list until you press **Load** — no
+manual setup, no per-tenant install. Open the toolbar popup on any F&O page
+and it shows *Active on: \<hostname\>*, confirming it picked up the new
 environment.
-
-The cached entity list is *not* per environment: it's stored once per browser
-profile, so after switching tenants press **Load** again in the panel to
-refresh it for the environment you're now on.
 
 It drives D365's standard user interface, so a customised environment or a
 future Microsoft interface change can require rebinding — see *Known
@@ -506,8 +509,8 @@ the MIT terms like the rest of the project.
 ## Privacy
 
 See [`PRIVACY.md`](PRIVACY.md) for exactly what the extension can access
-and where it stores it. Short version: it only runs on `*.dynamics.com`
-pages, nothing it reads or stores ever leaves your browser except a call to
+and where it stores it. Short version: it only runs on D365 Finance &
+Operations pages, nothing it reads or stores ever leaves your browser except a call to
 your own tenant's OData service (for the entity-name hint) and the upload
 D365 itself was already going to do — there's no backend, no analytics, and
 nothing sent to the developer.

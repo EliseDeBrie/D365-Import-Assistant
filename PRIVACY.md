@@ -1,6 +1,6 @@
 # Privacy Policy — D365 Import Assistant
 
-_Last updated: 2026-09-09_
+_Last updated: 2026-09-20_
 
 This is a browser extension, not a service — there is no backend server
 operated by the developer, and nothing described below is sent to the
@@ -9,17 +9,21 @@ browser, on your own machine.
 
 ## What the extension can see
 
-The extension only runs on pages under `https://*.dynamics.com` (its
-`host_permissions` in `manifest.json` are scoped to that domain and nothing
-else — it cannot read or act on any other site you visit).
+The extension only runs on Dynamics 365 Finance & Operations pages. Its
+`host_permissions` in `manifest.json` list the F&O hostnames —
+`https://*.operations.dynamics.com`, Microsoft's regional variants
+(`*.operations.eu.dynamics.com`, `.fr`, `.no`, `.sa`, `.ch`, `.uae`) and the
+legacy `*.axcloud.dynamics.com` and `*.cloudax.dynamics.com` — and nothing
+else. It cannot read or act on any other site you visit, including other
+Dynamics products (Sales, Business Central, Customer Insights) that share
+the `dynamics.com` domain.
 
-That domain covers more than Finance & Operations, so the scripts also load
-on other Dynamics apps hosted there. The **Import Assistant** button is limited
-to the Data management pages (configurable under *Where the button appears*),
-but `content/page-hook.js` — the small script that lets D365's own upload
-control accept a dropped file — loads on every `dynamics.com` page. It takes
-no action unless a run you started has armed it, and it reports only whether
-an upload request to D365 finished.
+Within F&O, the **Import Assistant** button is limited to the Data management
+pages (configurable under *Where the button appears*), but
+`content/page-hook.js` — the small script that lets D365's own upload
+control accept a dropped file — loads on every F&O page. It takes no action
+unless a run you started has armed it, and it reports only whether an upload
+request to D365 finished.
 
 On those pages, it can:
 
@@ -28,8 +32,10 @@ On those pages, it can:
   way a person clicking through the screen would.
 - **Read the files you drag onto it.** Excel workbooks are opened locally
   (in your browser) just far enough to list their sheet names: the workbook's
-  index (`xl/workbook.xml` inside the `.xlsx` zip) is read, and nothing else.
-  The cell data is never read, transmitted, or stored. The file
+  index (`xl/workbook.xml` inside the `.xlsx` zip) is read, and nothing else;
+  reading stops if that index would unpack to more than 4 MB, so a
+  malformed or malicious workbook can't exhaust the tab. The cell data is
+  never read, transmitted, or stored. The file
   itself goes only where you were already sending it: into D365's own
   upload control, via D365's own upload mechanism.
 - **Call your own tenant's OData service document** (`<your D365
@@ -56,7 +62,7 @@ What's stored:
 | --- | --- | --- |
 | Cleaning rules, run options, UI preferences (whether the launcher shows, which pages it appears on) | `chrome.storage.sync` | Remembering your settings |
 | Field-selector bindings, per D365 host | `chrome.storage.sync` | Letting the extension find the right controls on your environment |
-| Cached entity name list (one list per browser profile, not per environment) | `chrome.storage.local` | Avoiding re-fetching the list on every run |
+| Cached entity name list, per D365 host | `chrome.storage.local` | Avoiding re-fetching the list on every run; one environment's list is never shown on another |
 | Launcher button position | `chrome.storage.local` | Remembering where you dragged it |
 
 None of this is a file's contents, a password, a session token, or anything
@@ -70,7 +76,7 @@ that identifies you personally beyond the D365 hostnames you've used it on.
 - No network requests to anywhere other than your own D365 origin (for the
   entity list) and whatever D365's own page already does when you upload a
   file (D365's own upload endpoint, not one added by this extension).
-- No code execution outside the `*.dynamics.com` pages it's scoped to.
+- No code execution outside the Finance & Operations pages it's scoped to.
 
 ## Source code
 

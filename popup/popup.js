@@ -67,15 +67,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // Confirms, right here, that the extension is live on whichever D365
 // environment the active tab happens to be on right now -- no URL to type
-// in, no per-environment setup. host_permissions is a wildcard
-// (https://*.dynamics.com/*), so any sandbox or production tenant, including one
-// created after this extension was installed, works the moment you're on it.
+// in, no per-environment setup. host_permissions covers the F&O hostnames
+// (*.operations.dynamics.com and its regional and legacy variants), so any
+// sandbox or production tenant, including one created after this extension
+// was installed, works the moment you're on it.
+const FO_HOST_RE = /\.(operations(\.[a-z]+)?|axcloud|cloudax)\.dynamics\.com$/i;
+
 async function showCurrentEnvironment() {
   const envEl = document.getElementById('envStatus');
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const host = tab && tab.url && new URL(tab.url).hostname;
-    if (host && /\.dynamics\.com$/i.test(host)) {
+    if (host && FO_HOST_RE.test(host)) {
       envEl.textContent = `Active on: ${host}`;
       envEl.className = 'env-line env-active';
     } else {

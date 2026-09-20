@@ -27,12 +27,28 @@
     "storage"
   ],
   "host_permissions": [
-    "https://*.dynamics.com/*"
+    "https://*.operations.dynamics.com/*",
+    "https://*.operations.eu.dynamics.com/*",
+    "https://*.operations.fr.dynamics.com/*",
+    "https://*.operations.no.dynamics.com/*",
+    "https://*.operations.sa.dynamics.com/*",
+    "https://*.operations.ch.dynamics.com/*",
+    "https://*.operations.uae.dynamics.com/*",
+    "https://*.axcloud.dynamics.com/*",
+    "https://*.cloudax.dynamics.com/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://*.dynamics.com/*"
+        "https://*.operations.dynamics.com/*",
+        "https://*.operations.eu.dynamics.com/*",
+        "https://*.operations.fr.dynamics.com/*",
+        "https://*.operations.no.dynamics.com/*",
+        "https://*.operations.sa.dynamics.com/*",
+        "https://*.operations.ch.dynamics.com/*",
+        "https://*.operations.uae.dynamics.com/*",
+        "https://*.axcloud.dynamics.com/*",
+        "https://*.cloudax.dynamics.com/*"
       ],
       "js": [
         "content/page-hook.js"
@@ -43,7 +59,15 @@
     },
     {
       "matches": [
-        "https://*.dynamics.com/*"
+        "https://*.operations.dynamics.com/*",
+        "https://*.operations.eu.dynamics.com/*",
+        "https://*.operations.fr.dynamics.com/*",
+        "https://*.operations.no.dynamics.com/*",
+        "https://*.operations.sa.dynamics.com/*",
+        "https://*.operations.ch.dynamics.com/*",
+        "https://*.operations.uae.dynamics.com/*",
+        "https://*.axcloud.dynamics.com/*",
+        "https://*.cloudax.dynamics.com/*"
       ],
       "js": [
         "content/dom-utils.js",

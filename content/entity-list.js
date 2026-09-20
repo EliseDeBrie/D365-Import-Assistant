@@ -4,10 +4,25 @@
 
   let names = [];
 
-  async function load() {
+  function currentHost() {
+    return location.hostname || 'default';
+  }
+
+  // One list per environment: a consultant moving between customers must not
+  // see one tenant's custom entity names suggested on another's. Versions
+  // before this kept a single flat list for every host — it is dropped rather
+  // than migrated, since there is no way to tell which environment it came from.
+  async function readStore() {
     const data = await chrome.storage.local.get(STORAGE_KEY);
-    const stored = data[STORAGE_KEY];
-    if (stored && Array.isArray(stored.names)) names = stored.names;
+    const store = data[STORAGE_KEY];
+    if (!store || typeof store !== 'object' || Array.isArray(store.names)) return {};
+    return store;
+  }
+
+  async function load() {
+    const stored = (await readStore())[currentHost()];
+    names = stored && Array.isArray(stored.names) ? stored.names : [];
+    clearCache();
     return { count: names.length, fetchedAt: stored ? stored.fetchedAt : null };
   }
 
@@ -30,9 +45,12 @@
     if (fetched.length === 0) throw new Error('/data listed no entities');
 
     names = fetched.sort();
+    clearCache();
     const fetchedAt = Date.now();
+    const store = await readStore();
+    store[currentHost()] = { names, fetchedAt };
     // Thousands of names — too big for storage.sync's per-item quota.
-    await chrome.storage.local.set({ [STORAGE_KEY]: { names, fetchedAt } });
+    await chrome.storage.local.set({ [STORAGE_KEY]: store });
     return { count: names.length, fetchedAt };
   }
 
