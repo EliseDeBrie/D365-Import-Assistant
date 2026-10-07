@@ -429,6 +429,11 @@ jsdom has no layout engine and implements neither `Blob.stream()` nor
 `DataTransfer`; `test/harness.js` stands in for those and says why in each
 case. Nothing in `content/` is stubbed.
 
+For a Chromium-level smoke test of extension injection, file filtering, and
+the page-world file handoff, run `npx playwright install chromium` once, then
+`npm run test:browser`. This test uses a local fake D365 page and does not
+contact a tenant.
+
 ## Notes on how file attachment works
 
 **You never tell the extension where your files live, and there's no folder

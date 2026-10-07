@@ -50,7 +50,7 @@
   // embedded mid-word (e.g. "CustomersV3") untouched.
   function cleanFileName(rawName, rules) {
     rules = Object.assign({}, DEFAULT_RULES, rules || {});
-    let name = rawName;
+    let name = typeof rawName === 'string' ? rawName : '';
 
     if (rules.stripExtension) {
       name = name.replace(EXTENSION_RE, '');

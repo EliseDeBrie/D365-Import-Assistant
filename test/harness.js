@@ -15,6 +15,7 @@ const ROOT = path.join(__dirname, '..');
 const SCRIPTS = [
   'content/dom-utils.js',
   'content/matcher.js',
+  'content/settings.js',
   'content/xlsx-sheets.js',
   'content/entity-list.js',
   'content/binder.js',

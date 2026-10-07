@@ -150,3 +150,17 @@ test('refuses a workbook index that inflates past the size limit', async () => {
   const names = await D365IA.xlsxSheets.readSheetNames(asFile(zip, 'bomb.xlsx'));
   equal(names, []);
 });
+
+test('refuses an archive above the input size limit before reading it', async () => {
+  let read = false;
+  const names = await D365IA.xlsxSheets.readSheetNames({
+    name: 'oversized.xlsx',
+    size: 256 * 1024 * 1024 + 1,
+    async arrayBuffer() {
+      read = true;
+      throw new Error('must not read oversized archives');
+    }
+  });
+  equal(names, []);
+  equal(read, false);
+});

@@ -5,10 +5,12 @@
   "description": "Edge/Chromium extension that prepares D365 F&O Data management import projects from a batch of dropped files.",
   "scripts": {
     "test": "node test/run.js",
+    "test:browser": "node test/browser-smoke.js",
     "package": "node scripts/package.js"
   },
   "devDependencies": {
-    "jsdom": "^30.0.1"
+    "jsdom": "^30.0.1",
+    "playwright": "^1.63.0"
   },
   "license": "MIT",
   "repository": {

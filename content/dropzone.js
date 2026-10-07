@@ -99,8 +99,8 @@
     dz.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', async () => {
       const settings = await getSettings();
-      queue.addFiles(fileInput.files, settings.rules);
-      setStatus(`Added ${fileInput.files.length} file(s) to the queue.`);
+      const result = queue.addFilesDetailed(fileInput.files, settings.rules);
+      setStatus(queue.describeAddResult(result), result.rejected.length ? 'warn' : '');
       fileInput.value = '';
     });
 
