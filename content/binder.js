@@ -192,6 +192,13 @@
     return location.hostname || 'default';
   }
 
+  function normalizeSelector(selector) {
+    if (typeof selector !== 'string') return null;
+    const cleaned = selector.trim();
+    if (!cleaned || cleaned.length > 1024) return null;
+    return cleaned;
+  }
+
   // Selectors are environment-specific (a dev tenant can differ from prod),
   // so they're stored per host. Anything saved by an older version sat in a
   // single flat map — move it under the host it was captured on.
@@ -219,9 +226,15 @@
 
     Object.keys(hostBindings).forEach((role) => {
       const binding = hostBindings[role];
-      if (!binding || !binding.selector) return;
-      const migrated = migrateSelector(binding.selector);
-      if (migrated !== binding.selector) {
+      if (!binding || typeof binding !== 'object' || !binding.selector) return;
+      const selector = normalizeSelector(binding.selector);
+      if (!selector) {
+        delete hostBindings[role];
+        changed = true;
+        return;
+      }
+      const migrated = migrateSelector(selector);
+      if (migrated !== selector) {
         binding.selector = migrated;
         changed = true;
       }
@@ -251,10 +264,15 @@
   }
 
   async function saveBinding(role, selector, meta) {
+    const safeSelector = normalizeSelector(selector);
+    if (!safeSelector) {
+      throw new Error('Selector must be a non-empty string.');
+    }
+
     const store = await readStore();
     const host = currentHost();
     store[host] = Object.assign({}, store[host], {
-      [role]: Object.assign({ selector }, meta || {})
+      [role]: Object.assign({ selector: safeSelector }, meta || {})
     });
     await chrome.storage.sync.set({ bindings: store });
     return getBindings();

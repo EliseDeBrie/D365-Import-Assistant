@@ -25,7 +25,13 @@ global.test = test;
 global.assert = assert;
 global.equal = equal;
 
-const FILES = ['matcher.test.js', 'xlsx-sheets.test.js', 'entity-list.test.js', 'pipeline.test.js'];
+const FILES = [
+  'matcher.test.js',
+  'settings.test.js',
+  'xlsx-sheets.test.js',
+  'entity-list.test.js',
+  'pipeline.test.js'
+];
 
 FILES.forEach((file) => {
   currentFile = file;

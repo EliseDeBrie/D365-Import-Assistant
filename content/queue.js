@@ -10,6 +10,12 @@
     { pattern: /\.zip$/i, format: 'Package' },
     { pattern: /\.(xlsx|xlsm|xls)$/i, format: 'Excel' }
   ];
+  const SUPPORTED_FILE_RE = /\.(xlsx|xlsm|xls|csv|zip)$/i;
+
+  function isSupportedFileName(fileName) {
+    const name = typeof fileName === 'string' ? fileName.trim() : '';
+    return name.length > 0 && SUPPORTED_FILE_RE.test(name);
+  }
 
   function sourceFormatFor(fileName) {
     const match = FORMAT_BY_EXTENSION.find((entry) => entry.pattern.test(fileName));
@@ -125,8 +131,23 @@
       }
     }
 
-    function addFiles(fileList, rules) {
-      const newItems = Array.from(fileList).map((file) => ({
+    function addFilesDetailed(fileList, rules) {
+      const inputFiles = Array.from(fileList || []);
+      const rejected = [];
+      const validFiles = inputFiles.filter((file) => {
+        const name = file && typeof file.name === 'string' ? file.name.trim() : '';
+        if (!name) {
+          rejected.push({ name: '(unnamed file)', reason: 'missing filename' });
+          return false;
+        }
+        if (!isSupportedFileName(name)) {
+          rejected.push({ name, reason: 'unsupported file type' });
+          return false;
+        }
+        return true;
+      });
+
+      const newItems = validFiles.map((file) => ({
         id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         file,
         rawName: file.name,
@@ -155,7 +176,28 @@
         });
       });
 
-      return newItems;
+      return { added: newItems, rejected };
+    }
+
+    function addFiles(fileList, rules) {
+      return addFilesDetailed(fileList, rules).added;
+    }
+
+    function describeAddResult(result) {
+      const addedCount = result.added.length;
+      const text = [`Added ${addedCount} file${addedCount === 1 ? '' : 's'}`];
+      if (result.rejected.length) {
+        const examples = result.rejected
+          .slice(0, 3)
+          .map(({ name, reason }) => `${name.slice(0, 100)} (${reason})`);
+        const remaining = result.rejected.length - examples.length;
+        text.push(
+          `skipped ${result.rejected.length}: ${examples.join(', ')}${
+            remaining ? `, and ${remaining} more` : ''
+          }`
+        );
+      }
+      return text.join('; ') + '.';
     }
 
     // A dropped selection arrives in whatever order the OS hands it over,
@@ -856,6 +898,8 @@
 
     return {
       addFiles,
+      addFilesDetailed,
+      describeAddResult,
       getItems,
       updateItem,
       removeItem,

@@ -9,21 +9,9 @@
     urlPatterns: 'mi=DM_DataManagementWorkspaceMenuItem'
   };
 
-  const DEFAULT_OPTIONS = {
-    matchThreshold: 0.75,
-    stepDelay: 700,
-    elementTimeout: 5000,
-    uploadTimeout: 300000
-  };
-
   async function getSettings() {
     const data = await chrome.storage.sync.get('settings');
-    const stored = data.settings || {};
-    return {
-      rules: Object.assign({}, D365IA.matcher.DEFAULT_RULES, stored.rules || {}),
-      options: Object.assign({}, DEFAULT_OPTIONS, stored.options || {}),
-      ui: Object.assign({}, DEFAULT_UI, stored.ui || {})
-    };
+    return D365IA.settings.normalize(data.settings, D365IA.matcher.DEFAULT_RULES);
   }
 
   function parsePatterns(text) {
@@ -235,8 +223,8 @@
     setupGlobalDropCapture(async (files) => {
       const p = openPanel();
       const current = await getSettings();
-      queueApi.addFiles(files, current.rules);
-      p.setStatus(`Added ${files.length} file(s) to the queue.`);
+      const result = queueApi.addFilesDetailed(files, current.rules);
+      p.setStatus(queueApi.describeAddResult(result), result.rejected.length ? 'warn' : '');
     }, isActive);
 
     window.addEventListener('d365ia:open-setup', () => {

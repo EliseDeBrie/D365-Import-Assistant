@@ -78,6 +78,7 @@
         "content/queue.js",
         "content/dropzone.js",
         "content/setup-modal.js",
+        "content/settings.js",
         "content/content.js"
       ],
       "css": [

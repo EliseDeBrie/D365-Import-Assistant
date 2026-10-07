@@ -28,6 +28,20 @@ test('never strips the name down to nothing', () => {
   equal(matcher.cleanFileName('01.xlsx'), '01');
 });
 
+test('handles malformed names without throwing', () => {
+  equal(matcher.cleanFileName(null), '');
+  equal(matcher.cleanFileName({}), '');
+});
+
+test('ignores unsupported file types when queueing', () => {
+  const queue = D365IA.queue.createQueue({ onStatusChange() {} });
+  const result = queue.addFilesDetailed([{ name: 'payload.exe' }, { name: 'Orders.xlsx' }], {});
+  equal(result.added.length, 1);
+  equal(result.added[0].rawName, 'Orders.xlsx');
+  equal(result.rejected, [{ name: 'payload.exe', reason: 'unsupported file type' }]);
+  equal(queue.describeAddResult(result), 'Added 1 file; skipped 1: payload.exe (unsupported file type).');
+});
+
 // Files depend on each other, so the queue must run in numbered order —
 // which is not the order the OS hands a multi-file drop over in.
 test('sorts numerically, not lexically', () => {

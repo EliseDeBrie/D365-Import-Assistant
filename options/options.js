@@ -7,21 +7,13 @@ const CLEANING_FIELDS = [
   'titleCase'
 ];
 
-const DEFAULT_UI = {
-  showLauncher: true,
-  restrictToPages: true,
-  urlPatterns: 'mi=DM_DataManagementWorkspaceMenuItem'
-};
-
 async function load() {
   const data = await chrome.storage.sync.get(['settings', 'bindings']);
-  const settings = data.settings || {};
-  const rules = Object.assign({}, window.D365IA.matcher.DEFAULT_RULES, settings.rules || {});
-  const options = Object.assign(
-    { matchThreshold: 0.75, stepDelay: 700, elementTimeout: 5000, uploadTimeout: 300000 },
-    settings.options || {}
+  const settings = window.D365IA.settings.normalize(
+    data.settings,
+    window.D365IA.matcher.DEFAULT_RULES
   );
-  const ui = Object.assign({}, DEFAULT_UI, settings.ui || {});
+  const { rules, options, ui } = settings;
 
   document.getElementById('showLauncher').checked = !!ui.showLauncher;
   document.getElementById('restrictToPages').checked = !!ui.restrictToPages;
@@ -74,20 +66,25 @@ CLEANING_FIELDS.forEach((f) => document.getElementById(f).addEventListener('chan
 document.getElementById('testInput').addEventListener('input', runTest);
 
 document.getElementById('save').addEventListener('click', async () => {
-  const options = {
-    matchThreshold: parseFloat(document.getElementById('matchThreshold').value) || 0.75,
-    stepDelay: parseInt(document.getElementById('stepDelay').value, 10) || 700,
-    elementTimeout: parseInt(document.getElementById('elementTimeout').value, 10) || 5000,
-    uploadTimeout: parseInt(document.getElementById('uploadTimeout').value, 10) || 300000
-  };
+  const normalized = window.D365IA.settings.normalize(
+    {
+      rules: currentRules(),
+      options: {
+        matchThreshold: document.getElementById('matchThreshold').value,
+        stepDelay: document.getElementById('stepDelay').value,
+        elementTimeout: document.getElementById('elementTimeout').value,
+        uploadTimeout: document.getElementById('uploadTimeout').value
+      },
+      ui: {
+        showLauncher: document.getElementById('showLauncher').checked,
+        restrictToPages: document.getElementById('restrictToPages').checked,
+        urlPatterns: document.getElementById('urlPatterns').value
+      }
+    },
+    window.D365IA.matcher.DEFAULT_RULES
+  );
 
-  const ui = {
-    showLauncher: document.getElementById('showLauncher').checked,
-    restrictToPages: document.getElementById('restrictToPages').checked,
-    urlPatterns: document.getElementById('urlPatterns').value
-  };
-
-  await chrome.storage.sync.set({ settings: { rules: currentRules(), options, ui } });
+  await chrome.storage.sync.set({ settings: normalized });
   const status = document.getElementById('saveStatus');
   status.textContent = 'Saved.';
   setTimeout(() => (status.textContent = ''), 1500);

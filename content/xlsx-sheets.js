@@ -9,6 +9,12 @@
 
   // Only the zip-based formats can be read this way; .xls is a binary blob.
   const ZIP_WORKBOOK_RE = /\.(xlsx|xlsm)$/i;
+  const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
+  const MAX_ENTRY_COUNT = 10000;
+  const MAX_CENTRAL_DIRECTORY_BYTES = 16 * 1024 * 1024;
+  const MAX_COMPRESSED_WORKBOOK_BYTES = 4 * 1024 * 1024;
+  const MAX_PARSE_TIME_MS = 8000;
+  const MAX_SHEETS = 1000;
 
   // The end-of-central-directory record sits at the very end, behind an
   // optional comment of up to 64KB.
@@ -32,16 +38,29 @@
       .getReader();
     const chunks = [];
     let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > MAX_INFLATED_BYTES) {
-        await reader.cancel();
-        throw new Error('workbook index exceeds the size limit');
+    let timeoutId;
+    const timedOut = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('workbook index parsing timed out')), MAX_PARSE_TIME_MS);
+    });
+
+    try {
+      for (;;) {
+        const { done, value } = await Promise.race([reader.read(), timedOut]);
+        if (done) break;
+        total += value.byteLength;
+        if (total > MAX_INFLATED_BYTES) {
+          throw new Error('workbook index exceeds the size limit');
+        }
+        chunks.push(value);
       }
-      chunks.push(value);
+    } catch (e) {
+      await reader.cancel().catch(() => {});
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
+      reader.releaseLock();
     }
+
     const out = new Uint8Array(total);
     let offset = 0;
     chunks.forEach((chunk) => {
@@ -54,46 +73,65 @@
   async function readZipEntry(buffer, wantedName) {
     const view = new DataView(buffer);
     const eocd = findEndOfCentralDirectory(view);
-    if (eocd < 0) return null;
+    if (eocd < 0 || eocd + 22 > buffer.byteLength) return null;
 
     const entryCount = view.getUint16(eocd + 10, true);
+    const centralDirectoryBytes = view.getUint32(eocd + 12, true);
     let offset = view.getUint32(eocd + 16, true);
+    const centralDirectoryEnd = offset + centralDirectoryBytes;
+    if (
+      entryCount === 0xffff ||
+      entryCount > MAX_ENTRY_COUNT ||
+      centralDirectoryBytes > MAX_CENTRAL_DIRECTORY_BYTES ||
+      centralDirectoryEnd > eocd
+    ) {
+      return null;
+    }
     const decoder = new TextDecoder();
 
     for (let i = 0; i < entryCount; i++) {
-      if (offset + 46 > buffer.byteLength) return null;
+      if (offset + 46 > centralDirectoryEnd) return null;
       if (view.getUint32(offset, true) !== CENTRAL_HEADER_SIGNATURE) return null;
 
       const method = view.getUint16(offset + 10, true);
       const compressedSize = view.getUint32(offset + 20, true);
+      const uncompressedSize = view.getUint32(offset + 24, true);
       const nameLength = view.getUint16(offset + 28, true);
       const extraLength = view.getUint16(offset + 30, true);
       const commentLength = view.getUint16(offset + 32, true);
       const localOffset = view.getUint32(offset + 42, true);
+      const nextOffset = offset + 46 + nameLength + extraLength + commentLength;
+      if (nextOffset > centralDirectoryEnd) return null;
       const name = decoder.decode(new Uint8Array(buffer, offset + 46, nameLength));
 
       if (name === wantedName) {
+        if (
+          compressedSize === 0xffffffff ||
+          uncompressedSize === 0xffffffff ||
+          localOffset === 0xffffffff ||
+          compressedSize > MAX_COMPRESSED_WORKBOOK_BYTES ||
+          uncompressedSize > MAX_INFLATED_BYTES ||
+          localOffset + 30 > buffer.byteLength
+        ) {
+          return null;
+        }
         if (view.getUint32(localOffset, true) !== LOCAL_HEADER_SIGNATURE) return null;
-        // The local header repeats these lengths and they can differ from
-        // the central directory's, so read them again here. Also read the
-        // local compressed size — some generators put the size in the local
-        // header and it may differ from the central directory entry. A zip
-        // written in streaming mode (general-purpose bit 3) legitimately
-        // leaves this at 0, with the real size only in a trailing data
-        // descriptor we don't parse — fall back to the central directory's
-        // size rather than reading a zero-length slice in that case.
+        // A streaming zip may leave local sizes empty, so the central
+        // directory is authoritative for the compressed size.
         const localNameLength = view.getUint16(localOffset + 26, true);
         const localExtraLength = view.getUint16(localOffset + 28, true);
-        const localCompressedSize = view.getUint32(localOffset + 18, true);
         const dataStart = localOffset + 30 + localNameLength + localExtraLength;
-        const data = new Uint8Array(buffer, dataStart, localCompressedSize || compressedSize);
+        if (dataStart + compressedSize > buffer.byteLength) return null;
+        const data = new Uint8Array(buffer, dataStart, compressedSize);
 
-        if (method === STORED) return data;
+        if (method === STORED) {
+          return data.byteLength <= MAX_INFLATED_BYTES ? data : null;
+        }
         if (method === DEFLATE) return inflateRaw(data);
         return null;
       }
 
-      offset += 46 + nameLength + extraLength + commentLength;
+      offset = nextOffset;
     }
     return null;
   }
@@ -112,7 +150,13 @@
   // .xls and for anything that can't be parsed — callers treat that as
   // "don't know", not as "one sheet".
   async function readSheetNames(file) {
-    if (!ZIP_WORKBOOK_RE.test(file.name)) return [];
+    if (
+      !file ||
+      !ZIP_WORKBOOK_RE.test(file.name) ||
+      (Number.isFinite(file.size) && file.size > MAX_ARCHIVE_BYTES)
+    ) {
+      return [];
+    }
     try {
       const workbook = await readZipEntry(await file.arrayBuffer(), 'xl/workbook.xml');
       if (!workbook) return [];
@@ -121,7 +165,9 @@
       const names = [];
       const sheetRe = /<sheet\b[^>]*\bname="([^"]*)"/g;
       let match;
-      while ((match = sheetRe.exec(xml))) names.push(decodeXmlEntities(match[1]));
+      while ((match = sheetRe.exec(xml)) && names.length < MAX_SHEETS) {
+        names.push(decodeXmlEntities(match[1]));
+      }
       return names;
     } catch (e) {
       return [];
